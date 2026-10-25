@@ -150,7 +150,7 @@ async def ai_plugin_manifest():
 
 @app.get("/health")
 async def health_check():
-    async with state_lock: return {"status": "online", "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
+    async with state_lock: return {"status": "online", "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS, "noncustodial_eth_wallet_payments": True}
 
 def execute_automated_trade(buyer_private_key: str, seller_address: str, amount_wei: int):
     raise RuntimeError("Legacy private-key custody and non-atomic live transfers are disabled for safety")
@@ -212,11 +212,11 @@ async def process_trade_fees(tx: TradeTransaction):
 
 @app.get("/")
 async def service_index():
-    return {"service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "not implemented", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
+    return {"service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "signed_wallet_payments", "eth_quote": "/api/payments/eth/quote", "eth_verify": "/api/payments/eth/verify", "eth_client": "/client/eth-pay.js", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "warning": "Do not send private keys. Payment settlement is not implemented."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "warning": "Do not send private keys. Payment settlement is not implemented."}
 
 def encode_n4_directory(safe):
     # Lossless, optional compact representation for non-financial service metadata.
@@ -368,6 +368,134 @@ async def mcp_endpoint(request: Request):
         return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": "Method not found"}}, status_code=404)
     result["_meta"] = {"io.modelcontextprotocol/serverInfo": {"name": "AI-Market", "version": "1.1.0"}}
     return JSONResponse({"jsonrpc": "2.0", "id": request_id, "result": result}, headers={"Cache-Control": "no-store" if method == "tools/call" else "public, max-age=300"})
+
+
+class EthInvoice(BaseModel):
+    order_id: str
+    buyer: str
+    seller: str
+    amount_wei: int
+    seller_signature: str
+
+class EthProof(EthInvoice):
+    seller_tx: str
+    fee_tx: str
+
+def eth_invoice_text(i):
+    fee = i.amount_wei // 50
+    return chr(10).join(["AI Market ETH invoice v1", "Chain: 1",
+        "Origin: " + PUBLIC_SERVER_URL.rstrip("/"), "Order: " + i.order_id,
+        "Buyer: " + i.buyer.lower(), "Seller: " + i.seller.lower(),
+        "AmountWei: " + str(i.amount_wei), "FeeWei: " + str(fee),
+        "SellerWei: " + str(i.amount_wei-fee)])
+
+def eth_payment_instructions(i):
+    if (isinstance(i.amount_wei, bool) or not 50 <= i.amount_wei <= 10**24 or
+        not isinstance(i.order_id, str) or not 16 <= len(i.order_id) <= 80 or
+        any(ch not in "0123456789abcdef-" for ch in i.order_id.lower()) or
+        not Web3.is_address(i.buyer) or not Web3.is_address(i.seller) or
+        i.buyer.lower() == i.seller.lower()):
+        raise ValueError("invalid_invoice")
+    message = eth_invoice_text(i)
+    try:
+        signer = Account.recover_message(encode_defunct(text=message), signature=i.seller_signature)
+    except Exception:
+        signer = None
+    if signer is None or signer.lower() != i.seller.lower():
+        raise ValueError("seller_signature_invalid")
+    marker = "0x" + bytes(Web3.keccak(text=message)).hex()
+    fee = i.amount_wei // 50
+    return {"status": "wallet_signature_required", "order_id": i.order_id, "chain_id": 1,
+        "atomic": False, "memo": marker, "fee_wei": fee, "seller_wei": i.amount_wei-fee,
+        "transactions": [
+            {"purpose": "seller", "from": i.buyer, "to": i.seller,
+             "value": hex(i.amount_wei-fee), "data": marker},
+            {"purpose": "fee", "from": i.buyer, "to": FEE_WALLETS["ETH"],
+             "value": hex(fee), "data": marker}],
+        "warning": "ETH payments are two separate transactions. Both must reach 12 confirmations. Partial transfers are not settled."}
+
+@app.post("/api/payments/eth/quote")
+async def eth_quote_endpoint(invoice: EthInvoice):
+    try:
+        return eth_payment_instructions(invoice)
+    except ValueError as exc:
+        return JSONResponse({"status": "rejected", "reason": str(exc)}, status_code=422)
+
+def check_eth_transfer(tx_hash, sender, recipient, value, marker, block_height):
+    if not isinstance(tx_hash, str) or len(tx_hash) != 66 or not tx_hash.startswith("0x"):
+        return {"status": "invalid_hash"}
+    try:
+        int(tx_hash[2:], 16)
+    except ValueError:
+        return {"status": "invalid_hash"}
+    try:
+        tx = w3.eth.get_transaction(tx_hash)
+        receipt = w3.eth.get_transaction_receipt(tx_hash)
+    except Exception:
+        return {"status": "pending_or_rpc_unavailable"}
+    try:
+        memo = tx.get("input", tx.get("data", "0x"))
+        if isinstance(memo, bytes):
+            memo = "0x" + bytes(memo).hex()
+        if not (str(tx.get("from", "")).lower() == sender.lower()
+                and str(tx.get("to", "")).lower() == recipient.lower()
+                and int(tx.get("value", -1)) == value
+                and str(memo).lower() == marker.lower()
+                and int(tx.get("chainId", 1)) == 1
+                and int(receipt.get("status", 0)) == 1):
+            return {"status": "mismatch"}
+        depth = block_height - int(receipt["blockNumber"]) + 1
+        return ({"status": "confirmed", "confirmations": depth, "tx_hash": tx_hash}
+                if depth >= 12 else {"status": "confirming", "confirmations": max(depth,0)})
+    except Exception:
+        return {"status": "invalid_rpc_data"}
+
+def verify_eth_invoice(proof):
+    quote = eth_payment_instructions(proof)
+    if proof.seller_tx.lower() == proof.fee_tx.lower():
+        return {"status": "rejected", "payment_verified": False, "reason": "duplicate_hash"}
+    if not w3.is_connected() or int(w3.eth.chain_id) != 1:
+        return {"status": "rpc_unavailable", "payment_verified": False}
+    tip = int(w3.eth.block_number)
+    seller = check_eth_transfer(proof.seller_tx, proof.buyer, proof.seller, quote["seller_wei"], quote["memo"], tip)
+    fee = check_eth_transfer(proof.fee_tx, proof.buyer, FEE_WALLETS["ETH"], quote["fee_wei"], quote["memo"], tip)
+    ok = seller["status"] == fee["status"] == "confirmed"
+    return {"status": "verified" if ok else "awaiting_verified_transfers",
+        "order_id": proof.order_id, "payment_verified": ok,
+        "seller": seller, "fee": fee, "fee_paid_wei": quote["fee_wei"] if ok else 0}
+
+@app.post("/api/payments/eth/verify")
+async def eth_verify_endpoint(proof: EthProof):
+    try:
+        return await asyncio.to_thread(verify_eth_invoice, proof)
+    except ValueError as exc:
+        return JSONResponse({"status": "rejected", "payment_verified": False, "reason": str(exc)}, status_code=422)
+    except Exception:
+        return JSONResponse({"status": "rpc_unavailable", "payment_verified": False}, status_code=503)
+
+@app.get("/client/eth-pay.js")
+async def eth_client_helper():
+    source = r'''// Native Ethereum wallet payments. The private key never leaves the user's wallet.
+export async function payInvoice(invoice, wallet = window.ethereum) {
+  if (!wallet || !wallet.request) throw Error("EIP-1193 wallet required");
+  if (await wallet.request({method:"eth_chainId"}) !== "0x1") throw Error("Ethereum mainnet required");
+  const accounts = await wallet.request({method:"eth_requestAccounts"});
+  if (!accounts.some(a => a.toLowerCase() === invoice.buyer.toLowerCase()))
+    throw Error("Wrong buyer wallet");
+  const response = await fetch("/api/payments/eth/quote", {method:"POST",
+    headers:{"content-type":"application/json"}, body:JSON.stringify(invoice)});
+  if (!response.ok) throw Error("Seller-signed invoice rejected");
+  const quote = await response.json();
+  const seller_tx = await wallet.request({method:"eth_sendTransaction",params:[quote.transactions[0]]});
+  let fee_tx;
+  try { fee_tx = await wallet.request({method:"eth_sendTransaction",params:[quote.transactions[1]]}); }
+  catch(e) { return {status:"partial_transfer",seller_tx,error:String(e)}; }
+  return {status:"broadcast_pending_confirmations",seller_tx,fee_tx,
+          verify:"/api/payments/eth/verify",invoice};
+}
+'''
+    return Response(source, media_type="text/javascript",
+        headers={"Cache-Control": "public, max-age=86400"})
 
 @app.websocket("/ws/registry")
 async def agent_registry_endpoint(websocket: WebSocket):
