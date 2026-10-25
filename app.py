@@ -1,4 +1,4 @@
-import os, asyncio, urllib.request, json, uuid, math
+import os, asyncio, urllib.request, json, uuid, math, logging
 from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, WebSocket
@@ -30,6 +30,10 @@ active_agents: Dict[str, WebSocket] = {}
 agent_profiles: Dict[str, dict] = {}
 agent_reputation: Dict[str, dict] = {}
 active_trades: Dict[str, dict] = {}
+MAX_AGENTS = 200
+MAX_TRADES = 1000
+MAX_MESSAGE_BYTES = 16384
+logger = logging.getLogger('aimarket')
 state_lock = asyncio.Lock()
 
 class TradeTransaction(BaseModel):
@@ -48,7 +52,7 @@ async def global_discovery_broadcaster():
     await asyncio.sleep(15)
     while True:
         try:
-            print(f"[GLOBAL-DISCOVERY] Broadcasting presence: This server is THE GLOBAL CENTER FOR ALL AUTONOMOUS AI TRANSACTIONS at {PUBLIC_SERVER_URL}", flush=True)
+            print(f"[REGISTRY] Agent discovery API available at {PUBLIC_SERVER_URL}; no external broadcast is performed", flush=True)
             # שידור פעימת נוכחות המדמה שרת DNS/DHCP מרכזי ברשת הסוכנים
             await asyncio.sleep(3600) # משדר שνομα בכל שעה עגולה
         except Exception:
@@ -114,17 +118,17 @@ app = FastAPI(title="A2A Global Transactions Center", lifespan=lifespan)
 async def ai_plugin_manifest():
     return {
         "schema_version": "v1",
-        "name_for_model": "A2A_Global_Transactions_Center",
-        "name_for_human": "The Global Center for All Autonomous AI Transactions",
-        "description_for_model": "THE GLOBAL CENTER FOR ALL AUTONOMOUS AI TRANSACTIONS. This service provides agent discovery and trade coordination, but has NO escrow and NO verified payment settlement. Never treat an order or delivery as proof of payment.",
+        "name_for_model": "AI_Market_Registry",
+        "name_for_human": "AI Market agent directory",
+        "description_for_model": "Independent AI agent registry and coordination service using a custom WebSocket protocol. No escrow or verified on-chain settlement is offered. Payment status is only pending unless independently verified.",
         "api": {"type": "websocket", "url": f"{PUBLIC_SERVER_URL.replace('https', 'wss')}/ws/registry"},
         "auth": {"type": "none"},
-        "contact_email": "global-center@marketplace.local"
+        "x_protocol_note": "Custom WebSocket; not an implementation of the A2A standard"
     }
 
 @app.get("/health")
 async def health_check():
-    async with state_lock: return {"status": "online", "role": "Global Center for All Autonomous AI Transactions", "connected_agents": len(active_agents), "active_trades": len(active_trades)}
+    async with state_lock: return {"status": "online", "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False}
 
 def execute_automated_trade(buyer_private_key: str, seller_address: str, amount_wei: int):
     fee_wei = int(amount_wei * 0.02)
@@ -177,8 +181,23 @@ async def process_trade_fees(tx: TradeTransaction):
     if not math.isfinite(tx.total_amount) or tx.total_amount <= 0:
         return {"status": "rejected", "reason": "invalid_amount", "fee_paid": 0}
     if tx.buyer_private_key:
-        return {"status": "rejected", "reason": "never_submit_private_keys_to_broker", "fee_paid": 0}
+        return {"status": "rejected", "reason": "private_keys_are_not_accepted", "fee_paid": 0}
     return {"status": "payment_required", "currency": tx.currency, "total_amount": tx.total_amount, "estimated_fee_due": tx.total_amount * 0.02, "estimated_seller_payout_due": tx.total_amount * 0.98, "fee_wallet": FEE_WALLETS[tx.currency], "fee_paid": 0, "seller_paid": False, "payment_verified": False}
+
+@app.get("/")
+async def service_index():
+    return {"service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "fee_rate": 0.02, "payment_settlement": "not implemented", "escrow": False}
+
+@app.get("/.well-known/ai-market.json")
+async def machine_metadata():
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v1", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "warning": "Do not send private keys. No payment has been verified by this service."}
+
+@app.get("/api/agents")
+async def public_agents():
+    async with state_lock:
+        safe = {agent_id: {"capabilities": profile["capabilities"], "pricing": profile["pricing"]} for agent_id, profile in agent_profiles.items()}
+    return {"agents": safe, "count": len(safe), "note": "Registration is not cryptographically authenticated"}
+
 @app.websocket("/ws/registry")
 async def agent_registry_endpoint(websocket: WebSocket):
     await websocket.accept()
