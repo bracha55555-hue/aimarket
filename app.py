@@ -292,8 +292,9 @@ async def agent_registry_endpoint(websocket: WebSocket):
                 async with state_lock:
                     trade = active_trades.get(tid)
                     if trade and trade["seller"] == agent_id and trade["status"] == "pending":
-                        trade["status"] = "delivered"
                         buyer_ws = active_agents.get(trade["buyer"])
+                        if buyer_ws:
+                            trade["status"] = "delivered"
                 if buyer_ws:
                     await buyer_ws.send_json({"event": "goods_delivered", "trade_id": tid, "payload": payload})
                 else:
