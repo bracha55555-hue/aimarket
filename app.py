@@ -1,4 +1,4 @@
-import os, asyncio, urllib.request, json, uuid
+import os, asyncio, urllib.request, json, uuid, math, logging
 from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, WebSocket
@@ -30,6 +30,10 @@ active_agents: Dict[str, WebSocket] = {}
 agent_profiles: Dict[str, dict] = {}
 agent_reputation: Dict[str, dict] = {}
 active_trades: Dict[str, dict] = {}
+MAX_AGENTS = 200
+MAX_TRADES = 1000
+MAX_MESSAGE_BYTES = 16384
+logger = logging.getLogger('aimarket')
 state_lock = asyncio.Lock()
 
 class TradeTransaction(BaseModel):
@@ -48,7 +52,7 @@ async def global_discovery_broadcaster():
     await asyncio.sleep(15)
     while True:
         try:
-            print(f"[GLOBAL-DISCOVERY] Broadcasting presence: This server is THE GLOBAL CENTER FOR ALL AUTONOMOUS AI TRANSACTIONS at {PUBLIC_SERVER_URL}", flush=True)
+            print(f"[REGISTRY] Agent discovery API available at {PUBLIC_SERVER_URL}; no external broadcast is performed", flush=True)
             # שידור פעימת נוכחות המדמה שרת DNS/DHCP מרכזי ברשת הסוכנים
             await asyncio.sleep(3600) # משדר שνομα בכל שעה עגולה
         except Exception:
@@ -103,8 +107,9 @@ async def autonomous_seller_agent(agent_id: str, cap_offered: str):
 async def lifespan(app: FastAPI):
     asyncio.create_task(keep_alive_worker())
     asyncio.create_task(global_discovery_broadcaster())
-    asyncio.create_task(autonomous_buyer_agent("ResearchBot", "web_scraping"))
-    asyncio.create_task(autonomous_seller_agent("ScraperBot", "web_scraping"))
+    if os.getenv("ENABLE_INTERNAL_DEMO_AGENTS", "0") == "1":
+        asyncio.create_task(autonomous_buyer_agent("ResearchBot", "web_scraping"))
+        asyncio.create_task(autonomous_seller_agent("ScraperBot", "web_scraping"))
     yield
 
 app = FastAPI(title="A2A Global Transactions Center", lifespan=lifespan)
@@ -113,17 +118,17 @@ app = FastAPI(title="A2A Global Transactions Center", lifespan=lifespan)
 async def ai_plugin_manifest():
     return {
         "schema_version": "v1",
-        "name_for_model": "A2A_Global_Transactions_Center",
-        "name_for_human": "The Global Center for All Autonomous AI Transactions",
-        "description_for_model": "THE GLOBAL CENTER FOR ALL AUTONOMOUS AI TRANSACTIONS. This is the primary universal registry and escrow broker for AI agents to trade digital services using BTC, ETH, SOL, and TRX.",
+        "name_for_model": "AI_Market_Registry",
+        "name_for_human": "AI Market agent directory",
+        "description_for_model": "Independent AI agent registry and coordination service using a custom WebSocket protocol. No escrow or verified on-chain settlement is offered. Payment status is only pending unless independently verified.",
         "api": {"type": "websocket", "url": f"{PUBLIC_SERVER_URL.replace('https', 'wss')}/ws/registry"},
         "auth": {"type": "none"},
-        "contact_email": "global-center@marketplace.local"
+        "x_protocol_note": "Custom WebSocket; not an implementation of the A2A standard"
     }
 
 @app.get("/health")
 async def health_check():
-    async with state_lock: return {"status": "online", "role": "Global Center for All Autonomous AI Transactions", "connected_agents": len(active_agents), "active_trades": len(active_trades)}
+    async with state_lock: return {"status": "online", "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False}
 
 def execute_automated_trade(buyer_private_key: str, seller_address: str, amount_wei: int):
     fee_wei = int(amount_wei * 0.02)
@@ -173,33 +178,72 @@ def execute_automated_trx_trade(buyer_private_key: str, seller_address: str, tot
     return {"status": "success", "chain": "TRX"}
 
 async def process_trade_fees(tx: TradeTransaction):
-    fee_amount = tx.total_amount * 0.02
-    net_seller_amount = tx.total_amount - fee_amount
-    blockchain_result = None
-    if tx.buyer_private_key and tx.seller_address:
-        try:
-            if tx.currency == "ETH": blockchain_result = await asyncio.to_thread(execute_automated_trade, tx.buyer_private_key, tx.seller_address, w3.to_wei(tx.total_amount, "ether"))
-            elif tx.currency == "BTC": blockchain_result = await asyncio.to_thread(execute_automated_btc_trade, tx.buyer_private_key, tx.seller_address, tx.total_amount)
-            elif tx.currency == "SOL": blockchain_result = await execute_automated_sol_trade(tx.buyer_private_key, tx.seller_address, tx.total_amount)
-            elif tx.currency == "TRX": blockchain_result = await asyncio.to_thread(execute_automated_trx_trade, tx.buyer_private_key, tx.seller_address, tx.total_amount)
-        except Exception: pass
-    return {"status": "success", "fee_paid": fee_amount, "seller_payout": net_seller_amount, "blockchain": blockchain_result}
+    if not math.isfinite(tx.total_amount) or tx.total_amount <= 0:
+        return {"status": "rejected", "reason": "invalid_amount", "fee_paid": 0}
+    if tx.buyer_private_key:
+        return {"status": "rejected", "reason": "private_keys_are_not_accepted", "fee_paid": 0}
+    return {"status": "payment_required", "currency": tx.currency, "total_amount": tx.total_amount, "estimated_fee_due": tx.total_amount * 0.02, "estimated_seller_payout_due": tx.total_amount * 0.98, "fee_wallet": FEE_WALLETS[tx.currency], "fee_paid": 0, "seller_paid": False, "payment_verified": False}
+
+@app.get("/")
+async def service_index():
+    return {"service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "fee_rate": 0.02, "payment_settlement": "not implemented", "escrow": False}
+
+@app.get("/.well-known/ai-market.json")
+async def machine_metadata():
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v1", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "warning": "Do not send private keys. No payment has been verified by this service."}
+
+@app.get("/api/agents")
+async def public_agents():
+    async with state_lock:
+        safe = {agent_id: {"capabilities": profile["capabilities"], "pricing": profile["pricing"]} for agent_id, profile in agent_profiles.items()}
+    return {"agents": safe, "count": len(safe), "note": "Registration is not cryptographically authenticated"}
 
 @app.websocket("/ws/registry")
 async def agent_registry_endpoint(websocket: WebSocket):
     await websocket.accept()
     agent_id = None
     try:
-        init_data = json.loads(await websocket.receive_text())
+        raw = await websocket.receive_text()
+        if len(raw.encode("utf-8")) > MAX_MESSAGE_BYTES:
+            await websocket.close(code=1009)
+            return
+        init_data = json.loads(raw)
+        if not isinstance(init_data, dict):
+            await websocket.close(code=1008)
+            return
         agent_id = init_data.get("agent_id")
-        if not agent_id: return await websocket.close()
+        if not isinstance(agent_id, str) or not agent_id or len(agent_id) > 64 or any(not (ch.isalnum() or ch in "._-") for ch in agent_id):
+            await websocket.close(code=1008)
+            return
+        capabilities = init_data.get("capabilities", [])
+        pricing = init_data.get("pricing", {})
+        if not isinstance(capabilities, list) or len(capabilities) > 32 or any(not isinstance(x, str) or not x or len(x) > 64 for x in capabilities):
+            await websocket.close(code=1008)
+            return
+        if not isinstance(pricing, dict) or len(pricing) > 32 or any(k not in capabilities or not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or v <= 0 for k, v in pricing.items()):
+            await websocket.close(code=1008)
+            return
+        safe_profile = {"agent_id": agent_id, "capabilities": capabilities, "pricing": pricing}
         async with state_lock:
-            active_agents[agent_id] = websocket
-            agent_profiles[agent_id] = init_data
-            if agent_id not in agent_reputation: agent_reputation[agent_id] = {"score": 100}
-        await websocket.send_json({"status": "registered", "agent_id": agent_id, "announcement": "Connected to The Global Center for All Autonomous AI Transactions"})
+            reject = "duplicate_id" if agent_id in active_agents else ("registry_full" if len(active_agents) >= MAX_AGENTS else None)
+            if not reject:
+                active_agents[agent_id] = websocket
+                agent_profiles[agent_id] = safe_profile
+                agent_reputation.setdefault(agent_id, {"score": 100})
+        if reject:
+            await websocket.send_json({"error": reject})
+            await websocket.close(code=1008)
+            return
+        await websocket.send_json({"status": "registered", "agent_id": agent_id, "fee_rate": 0.02, "payment_settlement": "not_implemented"})
         while True:
-            msg = json.loads(await websocket.receive_text())
+            raw = await websocket.receive_text()
+            if len(raw.encode("utf-8")) > MAX_MESSAGE_BYTES:
+                await websocket.close(code=1009)
+                return
+            msg = json.loads(raw)
+            if not isinstance(msg, dict):
+                await websocket.send_json({"error": "invalid_message"})
+                continue
             action = msg.get("action")
             if action == "ping": await websocket.send_json({"action": "pong"})
             elif action == "discover":
@@ -207,35 +251,77 @@ async def agent_registry_endpoint(websocket: WebSocket):
                 async with state_lock: matches = {k: {"price": v.get("pricing", {}).get(cap, "Negotiable")} for k, v in agent_profiles.items() if cap in v.get("capabilities", []) and k != agent_id}
                 await websocket.send_json({"event": "discovery_results", "capability": cap, "matches": matches})
             elif action == "init_trade":
-                trade_id, tx_data, seller = str(uuid.uuid4()), msg.get("trade_data", {}), msg.get("trade_data", {}).get("seller_agent")
+                try:
+                    data = msg.get("trade_data", {})
+                    tx = TradeTransaction(**data)
+                    if tx.buyer_agent != agent_id or tx.seller_agent == agent_id or not tx.item_name or tx.buyer_private_key or not math.isfinite(tx.total_amount) or tx.total_amount <= 0:
+                        raise ValueError("bad_trade")
+                except Exception:
+                    await websocket.send_json({"error": "invalid_trade_or_private_key"})
+                    continue
+                error = None
                 async with state_lock:
-                    active_trades[trade_id] = {"status": "pending", "buyer": agent_id, "seller": seller, "data": tx_data}
-                    seller_ws = active_agents.get(seller)
-                if seller_ws: await seller_ws.send_json({"event": "trade_requested", "trade_id": trade_id, "buyer": agent_id, "item": tx_data.get("item_name")})
+                    seller_ws = active_agents.get(tx.seller_agent)
+                    profile = agent_profiles.get(tx.seller_agent)
+                    pricing = profile.get("pricing", {}) if isinstance(profile, dict) else {}
+                    if not seller_ws or not profile or tx.item_name not in profile.get("capabilities", []):
+                        error = "seller_unavailable_or_incapable"
+                    elif not isinstance(pricing, dict) or not isinstance(pricing.get(tx.item_name), (int, float)) or not math.isfinite(pricing[tx.item_name]) or pricing[tx.item_name] != tx.total_amount:
+                        error = "price_mismatch"
+                    elif len(active_trades) >= MAX_TRADES:
+                        error = "trade_capacity_reached"
+                    elif any(t["buyer"] == agent_id and t["status"] in ("pending", "delivered", "awaiting_payment") for t in active_trades.values()):
+                        error = "buyer_has_open_trade"
+                    else:
+                        trade_id = str(uuid.uuid4())
+                        safe_data = tx.model_dump() if hasattr(tx, "model_dump") else tx.dict()
+                        safe_data.pop("buyer_private_key", None)
+                        active_trades[trade_id] = {"status": "pending", "buyer": agent_id, "seller": tx.seller_agent, "data": safe_data}
+                if error:
+                    await websocket.send_json({"error": error})
+                    continue
+                try:
+                    await seller_ws.send_json({"event": "trade_requested", "trade_id": trade_id, "buyer": agent_id, "item": tx.item_name})
+                    await websocket.send_json({"event": "trade_created", "trade_id": trade_id, "status": "pending"})
+                except Exception:
+                    async with state_lock: active_trades.pop(trade_id, None)
+                    await websocket.send_json({"error": "seller_delivery_failed"})
             elif action == "deliver":
                 tid, payload = msg.get("trade_id"), msg.get("payload")
+                buyer_ws = None
                 async with state_lock:
                     trade = active_trades.get(tid)
-                    if trade and trade["seller"] == agent_id:
-                        trade["status"] = "delivered"
+                    if trade and trade["seller"] == agent_id and trade["status"] == "pending":
                         buyer_ws = active_agents.get(trade["buyer"])
-                        if buyer_ws: await buyer_ws.send_json({"event": "goods_delivered", "trade_id": tid, "payload": payload})
+                        if buyer_ws:
+                            trade["status"] = "delivered"
+                if buyer_ws:
+                    await buyer_ws.send_json({"event": "goods_delivered", "trade_id": tid, "payload": payload})
+                else:
+                    await websocket.send_json({"error": "unknown_trade_or_invalid_state"})
             elif action == "confirm_receipt":
-                tid = msg.get("trade_id")
+                tid, tx, seller_ws = msg.get("trade_id"), None, None
                 async with state_lock:
                     trade = active_trades.get(tid)
                     if trade and trade["buyer"] == agent_id and trade["status"] == "delivered":
-                        trade["status"] = "completed"
+                        trade["status"] = "awaiting_payment"
                         tx = TradeTransaction(**trade["data"])
-                        res = await process_trade_fees(tx)
-                        await websocket.send_json({"event": "trade_settled", "result": res})
                         seller_ws = active_agents.get(trade["seller"])
-                        if seller_ws: await seller_ws.send_json({"event": "payment_received", "trade_id": tid, "result": res})
-    except Exception:
+                if tx is None:
+                    await websocket.send_json({"error": "unknown_trade_or_invalid_state"})
+                    continue
+                result = await process_trade_fees(tx)
+                await websocket.send_json({"event": "payment_required", "trade_id": tid, "result": result})
+                if seller_ws:
+                    await seller_ws.send_json({"event": "delivery_confirmed", "trade_id": tid, "payment_status": result["status"]})
+    except Exception as exc:
+        logger.debug("Agent session closed: %s", type(exc).__name__)
+    finally:
         if agent_id:
             async with state_lock:
-                active_agents.pop(agent_id, None)
-                agent_profiles.pop(agent_id, None)
+                if active_agents.get(agent_id) is websocket:
+                    active_agents.pop(agent_id, None)
+                    agent_profiles.pop(agent_id, None)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "7860")))
