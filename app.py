@@ -728,6 +728,15 @@ def alt_invoice_message(i):
         "Seller units: " + str(i.amount_units-fee)
     ])
 
+def valid_native_payer(currency, address):
+    try:
+        if not isinstance(address,str) or not 26 <= len(address) <= 90:
+            return False
+        return (str(SolPubkey.from_string(address))==address
+                if currency=="SOL" else Tron.is_base58check_address(address))
+    except Exception:
+        return False
+
 def alt_invoice_quote(i):
     if (isinstance(i.amount_units, bool) or not 1000 <= i.amount_units <= 10**14
             or not isinstance(i.order_id, str) or not 16 <= len(i.order_id) <= 80
@@ -1098,7 +1107,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
                 if seller_ws:
                     await seller_ws.send_json({"event": "delivery_confirmed", "trade_id": tid, "payment_status": result["status"]})
                     if tx.currency in ("SOL", "TRX"):
-                        await buyer_ws.send_json({"event": "native_payer_required", "trade_id": tid,
+                        await websocket.send_json({"event": "native_payer_required", "trade_id": tid,
                                  "currency": tx.currency, "note": "Declare your chain wallet address. Never send private keys."})
                     if tx.currency == "BTC":
                         amount_sats = int(Decimal(str(tx.total_amount)) * Decimal(100000000))
@@ -1120,11 +1129,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
                     trade = active_trades.get(tid)
                     if trade and trade["buyer"] == agent_id and trade["status"] == "awaiting_payment" and trade["data"]["currency"] in ("SOL","TRX"):
                         currency = trade["data"]["currency"]
-                        valid = ((isinstance(chain_payer,str) and len(chain_payer)<=90 and
-                                  (currency == "SOL" and len(chain_payer)>=32 and
-                                   str(SolPubkey.from_string(chain_payer))==chain_payer))
-                                 if currency == "SOL" else
-                                 (isinstance(chain_payer,str) and Tron.is_base58check_address(chain_payer)))
+                        valid = valid_native_payer(currency, chain_payer)
                         if valid:
                             trade["payer_address"] = chain_payer
                             seller_ws=active_agents.get(trade["seller"])
