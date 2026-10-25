@@ -1,0 +1,76 @@
+name: Atomic BTC payment validation
+on:
+  push:
+    branches: [payments/noncustodial-btc-20261025]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt httpx
+      - run: python -m py_compile app.py
+      - name: Verify signed Bitcoin checkout and OP_RETURN payment proofs
+        run: |
+          python - <<'PY'
+          import ast,json
+          import app as m
+          from eth_account import Account
+          from eth_account.messages import encode_defunct
+          from fastapi.testclient import TestClient
+          buyer=Account.create()
+          seller=Account.create()
+          btc_address="bc1q"+"q"*38
+          inv=m.BtcInvoice(order_id="f"*32,buyer=buyer.address,seller=seller.address,
+            seller_btc_address=btc_address,amount_sats=1000000,seller_signature="placeholder")
+          sig=Account.sign_message(encode_defunct(text=m.btc_invoice_message(inv)),seller.key).signature.hex()
+          invoice=m.BtcInvoice(order_id=inv.order_id,buyer=buyer.address,seller=seller.address,
+            seller_btc_address=btc_address,amount_sats=inv.amount_sats,seller_signature=sig)
+          quote=m.btc_invoice_quote(invoice)
+          assert quote["atomic"] is True and quote["fee_sats"]==20000
+          assert quote["seller_sats"]==980000
+          assert quote["outputs"][1]["address"]==m.FEE_WALLETS["BTC"]
+          import urllib.request
+          old=urllib.request.urlopen
+          import io
+          payload={"status":{"confirmed":True,"block_height":95},"vout":[
+             {"scriptpubkey_address":btc_address,"value":980000},
+             {"scriptpubkey_address":m.FEE_WALLETS["BTC"],"value":20000},
+             {"scriptpubkey":"6a20"+quote["op_return_hex"],"value":0}]}
+          class Response:
+              def __init__(self,data): self.f=io.BytesIO(data)
+              def __enter__(self): return self
+              def __exit__(self,*args): pass
+              def read(self,n): return self.f.read(n)
+          def fake_urlopen(url,timeout=10):
+              if url.endswith("/blocks/tip/height"): return Response(b"100")
+              return Response(json.dumps(payload).encode())
+          urllib.request.urlopen=fake_urlopen
+          try:
+              proof=m.BtcProof(**invoice.model_dump(),btc_txid="a"*64)
+              out=m.verify_btc_proof(proof)
+              assert out["payment_verified"] and out["status"]=="verified",out
+              payload["vout"][1]["value"]=19999
+              assert not m.verify_btc_proof(proof)["payment_verified"]
+              payload["vout"][1]["value"]=20000
+              payload["vout"][2]["scriptpubkey"]="6a20"+"0"*64
+              assert not m.verify_btc_proof(proof)["payment_verified"]
+              payload["vout"][2]["scriptpubkey"]="6a20"+quote["op_return_hex"]
+              payload["status"]["block_height"]=100
+              assert not m.verify_btc_proof(proof)["payment_verified"]
+          finally:
+              urllib.request.urlopen=old
+          with TestClient(m.app) as c:
+              assert c.get("/client/btc-agent.py").status_code==200
+              ast.parse(c.get("/client/btc-agent.py").text)
+              assert c.post("/api/payments/btc/quote",json=invoice.model_dump()).status_code==200
+              altered=invoice.model_dump();altered["amount_sats"]+=1
+              assert c.post("/api/payments/btc/quote",json=altered).status_code==422
+              assert c.get("/health").json()["noncustodial_btc_atomic_payment"] is True
+          print("BTC quote, atomic transaction outputs and confirmation proof PASS")
+          PY
