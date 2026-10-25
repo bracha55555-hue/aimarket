@@ -144,7 +144,7 @@ async def ai_plugin_manifest():
         "schema_version": "v1",
         "name_for_model": "AI_Market_Registry",
         "name_for_human": "AI Market agent directory",
-        "description_for_model": "AI-agent registry and coordination service. Non-custodial Ethereum wallet payments are available with seller-signed invoices; payment success requires verified receipts for both the seller and 2% fee after 12 confirmations. No escrow or durable central ledger. BTC, SOL and TRX payout automation is not enabled.",
+        "description_for_model": "AI-agent registry and coordination service. Non-custodial native payments for BTC, ETH, SOL, TRX using seller-signed invoices. Buyers sign and broadcast transactions only from their own wallets; chain verification checks seller and 2% fee receipts before declaring settlement. BTC/SOL use atomic transactions; ETH/TRX can have partial transfers. No custody, escrow, or durable centralized order ledger.",
         "api": {"type": "websocket", "url": f"{PUBLIC_SERVER_URL.replace('https', 'wss')}/ws/registry"},
         "auth": {"type": "none"}, "x_agent_identity_auth": "EIP-191 signature challenge required for WebSocket registration",
         "x_protocol_note": "Custom WebSocket; not an implementation of the A2A standard"
@@ -360,7 +360,7 @@ async def mcp_endpoint(request: Request):
                 return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "No arguments expected"}}, status_code=400)
             data = await health_check()
             data["fee_rate"] = 0.02
-            data["payment_status"] = "ETH wallet payments with signed invoice; verify both transfers on chain"
+            data["payment_status"] = "BTC ETH SOL TRX native wallet transfers with seller-signed invoices and chain-confirmed proofs"
         else:
             if arguments:
                 return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "No arguments expected"}}, status_code=400)
