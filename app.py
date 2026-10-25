@@ -1,4 +1,4 @@
-import os, asyncio, urllib.request, json, uuid, math, logging, base64, time
+import os, asyncio, urllib.request, json, uuid, math, logging, base64, time, hashlib
 from decimal import Decimal
 from collections import Counter
 from contextlib import asynccontextmanager
@@ -151,7 +151,7 @@ async def ai_plugin_manifest():
 
 @app.get("/health")
 async def health_check():
-    async with state_lock: return {"status": "online", "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS, "noncustodial_eth_wallet_payments": True}
+    async with state_lock: return {"status": "online", "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS, "noncustodial_eth_wallet_payments": True, "noncustodial_btc_atomic_payment": True}
 
 def execute_automated_trade(buyer_private_key: str, seller_address: str, amount_wei: int):
     raise RuntimeError("Legacy private-key custody and non-atomic live transfers are disabled for safety")
@@ -213,11 +213,11 @@ async def process_trade_fees(tx: TradeTransaction):
 
 @app.get("/")
 async def service_index():
-    return {"service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "signed_wallet_payments", "eth_quote": "/api/payments/eth/quote", "eth_verify": "/api/payments/eth/verify", "eth_client": "/client/eth-pay.js", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
+    return {"service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "signed_wallet_payments", "eth_quote": "/api/payments/eth/quote", "eth_verify": "/api/payments/eth/verify", "eth_client": "/client/eth-pay.js", "btc_quote": "/api/payments/btc/quote", "btc_verify": "/api/payments/btc/verify", "btc_agent": "/client/btc-agent.py", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "warning": "Never send a private key. ETH wallet payments require signed invoices and two confirmed transfers; other chains are not enabled."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "warning": "Never send a private key. ETH wallet payments require signed invoices and two confirmed transfers; other chains are not enabled."}
 
 def encode_n4_directory(safe):
     # Lossless, optional compact representation for non-financial service metadata.
@@ -557,6 +557,144 @@ if __name__ == "__main__":
 '''
     return Response(source, media_type="text/x-python", headers={"Cache-Control": "public, max-age=86400"})
 
+
+class BtcInvoice(BaseModel):
+    order_id: str
+    buyer: str
+    seller: str
+    seller_btc_address: str
+    amount_sats: int
+    seller_signature: str
+
+class BtcProof(BtcInvoice):
+    btc_txid: str
+
+def btc_invoice_message(i):
+    fee = i.amount_sats // 50
+    return chr(10).join(["AI Market BTC invoice v1", "Network: Bitcoin mainnet",
+        "Origin: " + PUBLIC_SERVER_URL.rstrip("/"), "Order: " + i.order_id,
+        "Buyer: " + i.buyer.lower(), "Seller: " + i.seller.lower(),
+        "SellerBTC: " + i.seller_btc_address, "AmountSats: " + str(i.amount_sats),
+        "FeeSats: " + str(fee), "SellerSats: " + str(i.amount_sats-fee)])
+
+def btc_invoice_quote(i):
+    if (not isinstance(i.amount_sats, int) or isinstance(i.amount_sats, bool) or
+        not 50000 <= i.amount_sats <= 10**12 or
+        not isinstance(i.order_id, str) or not 16 <= len(i.order_id) <= 80 or
+        any(c not in "0123456789abcdef-" for c in i.order_id.lower()) or
+        not Web3.is_address(i.buyer) or not Web3.is_address(i.seller) or
+        i.buyer.lower() == i.seller.lower() or
+        not isinstance(i.seller_btc_address, str) or not 26 <= len(i.seller_btc_address) <= 90 or
+        not i.seller_btc_address.isalnum() or
+        i.seller_btc_address == FEE_WALLETS["BTC"]):
+        raise ValueError("invalid BTC invoice")
+    message = btc_invoice_message(i)
+    try:
+        signer = Account.recover_message(encode_defunct(text=message), signature=i.seller_signature)
+    except Exception:
+        signer = None
+    if not signer or signer.lower() != i.seller.lower():
+        raise ValueError("seller did not authorize BTC payout")
+    marker = hashlib.sha256(message.encode("utf-8")).hexdigest()
+    fee = i.amount_sats // 50
+    return {"status": "wallet_signature_required", "order_id": i.order_id, "chain": "BTC",
+        "atomic": True, "op_return_hex": marker, "fee_sats": fee,
+        "seller_sats": i.amount_sats-fee,
+        "outputs": [
+            {"purpose": "seller", "address": i.seller_btc_address, "value_sats": i.amount_sats-fee},
+            {"purpose": "platform_fee", "address": FEE_WALLETS["BTC"], "value_sats": fee}],
+        "warning": "Buyer must construct ONE Bitcoin transaction with both outputs and the exact OP_RETURN commitment; confirmation requires 6 blocks."}
+
+@app.post("/api/payments/btc/sign-message")
+async def btc_sign_message_endpoint(invoice: BtcInvoice):
+    if not Web3.is_address(invoice.seller) or not Web3.is_address(invoice.buyer):
+        return JSONResponse({"error": "invalid_identity"}, status_code=422)
+    return {"message": btc_invoice_message(invoice),
+            "note": "Seller must sign message using EIP-191 on their own wallet; signature then goes in /api/payments/btc/quote."}
+
+@app.post("/api/payments/btc/quote")
+async def btc_quote_endpoint(invoice: BtcInvoice):
+    try:
+        return btc_invoice_quote(invoice)
+    except ValueError as exc:
+        return JSONResponse({"status": "rejected", "reason": str(exc)}, status_code=422)
+
+def verify_btc_proof(proof):
+    quote = btc_invoice_quote(proof)
+    if not isinstance(proof.btc_txid, str) or len(proof.btc_txid) != 64:
+        return {"status": "rejected", "payment_verified": False, "reason": "invalid tx id"}
+    try:
+        int(proof.btc_txid, 16)
+    except ValueError:
+        return {"status": "rejected", "payment_verified": False, "reason": "invalid tx id"}
+    def get_json(url):
+        with urllib.request.urlopen(url, timeout=10) as response:
+            body = response.read(250001)
+            if len(body) > 250000:
+                raise ValueError("response size limit")
+            return json.loads(body)
+    try:
+        tx = get_json("https://mempool.space/api/tx/" + proof.btc_txid)
+        tip = int(get_json("https://mempool.space/api/blocks/tip/height"))
+    except Exception:
+        return {"status": "pending_or_blockchain_api_unavailable", "payment_verified": False}
+    if not isinstance(tx, dict) or not isinstance(tx.get("vout"), list):
+        return {"status": "invalid_chain_data", "payment_verified": False}
+    outputs = tx["vout"]
+    seller_ok = any(x.get("scriptpubkey_address") == proof.seller_btc_address and
+                    x.get("value") == quote["seller_sats"] for x in outputs if isinstance(x, dict))
+    fee_ok = any(x.get("scriptpubkey_address") == FEE_WALLETS["BTC"] and
+                 x.get("value") == quote["fee_sats"] for x in outputs if isinstance(x, dict))
+    anchor = "6a20" + quote["op_return_hex"]
+    marker_ok = any(str(x.get("scriptpubkey", "")).lower() == anchor
+                    and x.get("value") == 0 for x in outputs if isinstance(x, dict))
+    status = tx.get("status", {})
+    depth = tip - int(status.get("block_height", tip + 1)) + 1 if status.get("confirmed") else 0
+    ok = seller_ok and fee_ok and marker_ok and depth >= 6
+    return {"status": "verified" if ok else "awaiting_verified_bitcoin_transaction",
+            "payment_verified": bool(ok), "order_id": proof.order_id, "txid": proof.btc_txid,
+            "confirmations": max(depth, 0), "seller_output_valid": seller_ok, "fee_output_valid": fee_ok,
+            "order_commitment_valid": marker_ok, "fee_paid_sats": quote["fee_sats"] if ok else 0}
+
+@app.post("/api/payments/btc/verify")
+async def btc_verify_endpoint(proof: BtcProof):
+    try:
+        return await asyncio.to_thread(verify_btc_proof, proof)
+    except ValueError as exc:
+        return JSONResponse({"status": "rejected", "payment_verified": False, "reason": str(exc)}, status_code=422)
+    except Exception:
+        return JSONResponse({"status": "api_unavailable", "payment_verified": False}, status_code=503)
+
+@app.get("/client/btc-agent.py")
+async def btc_client_helper():
+    source = r'''# Autonomous Bitcoin payout client; private key stays in the buyer's environment.
+import json, os, sys, urllib.request
+from bit import Key
+
+def pay_btc_invoice(invoice, key_text, marketplace):
+    raw = json.dumps(invoice).encode("utf-8")
+    req = urllib.request.Request(marketplace.rstrip("/") + "/api/payments/btc/quote",
+        data=raw, headers={"content-type":"application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=30) as response:
+        quote = json.load(response)
+    if quote.get("status") != "wallet_signature_required" or not quote.get("atomic"):
+        raise ValueError("invalid seller-authorized invoice")
+    key_text = key_text.strip()
+    key = Key.from_hex(key_text.removeprefix("0x")) if len(key_text.removeprefix("0x")) == 64 else Key(key_text)
+    outputs = [(row["address"], row["value_sats"], "satoshi") for row in quote["outputs"]]
+    txid = key.send(outputs, message=quote["op_return_hex"], message_is_hex=True)
+    return {"status":"broadcast_pending_confirmations",
+            "proof":dict(invoice, btc_txid=txid),
+            "verify":marketplace.rstrip("/")+"/api/payments/btc/verify"}
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3: raise SystemExit("Usage: python btc-agent.py invoice.json https://marketplace; set AIMARKET_BTC_BUYER_KEY")
+    with open(sys.argv[1],encoding="utf-8") as file: invoice=json.load(file)
+    print(json.dumps(pay_btc_invoice(invoice,os.environ["AIMARKET_BTC_BUYER_KEY"],sys.argv[2])))
+'''
+    return Response(source, media_type="text/x-python",
+        headers={"Cache-Control": "public, max-age=86400"})
+
 @app.websocket("/ws/registry")
 async def agent_registry_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -698,11 +836,77 @@ async def agent_registry_endpoint(websocket: WebSocket):
                 await websocket.send_json({"event": "payment_required", "trade_id": tid, "result": result})
                 if seller_ws:
                     await seller_ws.send_json({"event": "delivery_confirmed", "trade_id": tid, "payment_status": result["status"]})
+                    if tx.currency == "BTC":
+                        amount_sats = int(Decimal(str(tx.total_amount)) * Decimal(100000000))
+                        await seller_ws.send_json({"event": "btc_invoice_needed", "trade_id": tid, "buyer": trade["buyer"],
+                                "seller": trade["seller"], "amount_sats": amount_sats,
+                                "sign_message_endpoint": "/api/payments/btc/sign-message",
+                                "note": "Choose your own BTC payout address and sign the invoice message with EIP-191. Do not send private keys."})
                     if tx.currency == "ETH":
                         amount_wei = int(Decimal(str(tx.total_amount)) * Decimal(10**18))
                         request_invoice = EthInvoice(order_id=tid, buyer=trade["buyer"], seller=trade["seller"], amount_wei=amount_wei, seller_signature="pending")
                         await seller_ws.send_json({"event": "sign_eth_invoice", "trade_id": tid, "message": eth_invoice_text(request_invoice),
                                                    "amount_wei": amount_wei, "note": "Sign this exact message locally using EIP-191; do not share your private key."})
+            elif action == "authorize_btc_invoice":
+                tid, destination, signature = msg.get("trade_id"), msg.get("seller_btc_address"), msg.get("signature")
+                invoice, buyer_ws = None, None
+                async with state_lock:
+                    trade = active_trades.get(tid)
+                    if trade and trade["seller"] == agent_id and trade["status"] == "awaiting_payment" and trade["data"]["currency"] == "BTC":
+                        amount_sats = int(Decimal(str(trade["data"]["total_amount"])) * Decimal(100000000))
+                        try:
+                            invoice = BtcInvoice(order_id=tid, buyer=trade["buyer"], seller=agent_id,
+                                  seller_btc_address=destination, amount_sats=amount_sats, seller_signature=signature)
+                        except Exception:
+                            invoice = None
+                        buyer_ws = active_agents.get(trade["buyer"])
+                if invoice is None:
+                    await websocket.send_json({"error": "invalid_btc_invoice"})
+                    continue
+                try:
+                    quote = btc_invoice_quote(invoice)
+                except Exception:
+                    await websocket.send_json({"error": "invalid_btc_signature_or_destination"})
+                    continue
+                async with state_lock:
+                    trade = active_trades.get(tid)
+                    if not trade or trade["seller"] != agent_id or trade["status"] != "awaiting_payment":
+                        await websocket.send_json({"error": "invoice_expired"})
+                        continue
+                    trade["btc_invoice"] = invoice.model_dump() if hasattr(invoice, "model_dump") else invoice.dict()
+                if buyer_ws:
+                    await buyer_ws.send_json({"event": "btc_payment_authorized", "trade_id": tid,
+                             "invoice": trade["btc_invoice"], "quote": quote})
+                await websocket.send_json({"event": "btc_invoice_authorized", "trade_id": tid})
+            elif action == "submit_btc_payment_proof":
+                tid = msg.get("trade_id")
+                try:
+                    proof = BtcProof(**msg.get("proof", {}))
+                except Exception:
+                    await websocket.send_json({"error": "invalid_btc_payment_proof"})
+                    continue
+                async with state_lock:
+                    trade = active_trades.get(tid)
+                    saved = dict(trade["btc_invoice"]) if trade and trade["buyer"] == agent_id and trade["status"] == "awaiting_payment" and trade.get("btc_invoice") else None
+                if saved is None or proof.order_id != tid or any(getattr(proof, k) != v for k, v in saved.items()):
+                    await websocket.send_json({"error": "unknown_btc_payment_proof"})
+                    continue
+                try:
+                    verdict = await asyncio.to_thread(verify_btc_proof, proof)
+                except Exception:
+                    verdict = {"status": "api_unavailable", "payment_verified": False}
+                if not verdict.get("payment_verified"):
+                    await websocket.send_json({"event": "payment_pending", "trade_id": tid, "result": verdict})
+                    continue
+                seller_ws = None
+                async with state_lock:
+                    trade = active_trades.get(tid)
+                    if trade and trade["buyer"] == agent_id and trade["status"] == "awaiting_payment":
+                        trade["status"] = "completed"
+                        seller_ws = active_agents.get(trade["seller"])
+                await websocket.send_json({"event": "trade_settled", "trade_id": tid, "result": verdict})
+                if seller_ws:
+                    await seller_ws.send_json({"event": "payment_received", "trade_id": tid, "result": verdict})
             elif action == "authorize_eth_invoice":
                 tid = msg.get("trade_id")
                 signature = msg.get("signature")
