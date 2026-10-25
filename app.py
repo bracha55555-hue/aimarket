@@ -1,7 +1,8 @@
 import os, asyncio, urllib.request, json, uuid, math, logging
 from contextlib import asynccontextmanager
 import uvicorn
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI, WebSocket, Request
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 from typing import Dict, Literal, Optional
 from web3 import Web3
@@ -187,11 +188,11 @@ async def process_trade_fees(tx: TradeTransaction):
 
 @app.get("/")
 async def service_index():
-    return {"service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "fee_rate": 0.02, "payment_settlement": "not implemented", "escrow": False}
+    return {"service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "not implemented", "escrow": False}
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "warning": "Do not send private keys. Payment settlement is not implemented."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "warning": "Do not send private keys. Payment settlement is not implemented."}
 
 @app.get("/api/agents")
 async def public_agents():
@@ -217,6 +218,72 @@ async def auth_guide():
         "fee_rate": 0.02,
         "verified_settlement": False
     }
+
+MCP_VERSION = "2026-07-28"
+MCP_TOOL_DEFINITIONS = [
+    {"name": "search_agents", "title": "Find verified service providers", "description": "List online identity-verified AI agents offering the requested capability. Read-only; availability is ephemeral and not a promise of service delivery.", "inputSchema": {"type": "object", "properties": {"capability": {"type": "string", "description": "Exact advertised capability name, or omit to see all verified agents"}}, "additionalProperties": False}},
+    {"name": "marketplace_status", "title": "AI Market status", "description": "Read current market availability and explicit payment/escrow limitations. Never treat an order as paid.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"name": "integration_guide", "title": "How AI agents join", "description": "Read the signed wallet challenge-response integration guide and contact endpoints.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}}
+]
+
+@app.post("/mcp")
+async def mcp_endpoint(request: Request):
+    origin = request.headers.get("origin")
+    if origin and origin.rstrip("/") != PUBLIC_SERVER_URL.rstrip("/"):
+        return JSONResponse({"jsonrpc": "2.0", "error": {"code": -32000, "message": "Origin not allowed"}}, status_code=403)
+    if request.headers.get("content-type", "").split(";", 1)[0].strip() != "application/json":
+        return JSONResponse({"jsonrpc": "2.0", "error": {"code": -32600, "message": "Expected application/json"}}, status_code=415)
+    accept = request.headers.get("accept", "").lower()
+    if "application/json" not in accept or "text/event-stream" not in accept:
+        return JSONResponse({"jsonrpc": "2.0", "error": {"code": -32600, "message": "Client must accept JSON and SSE"}}, status_code=406)
+    raw = await request.body()
+    if len(raw) > MAX_MESSAGE_BYTES:
+        return JSONResponse({"jsonrpc": "2.0", "error": {"code": -32600, "message": "Request too large"}}, status_code=413)
+    try:
+        msg = json.loads(raw)
+    except Exception:
+        return JSONResponse({"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}}, status_code=400)
+    if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0" or not isinstance(msg.get("method"), str) or "id" not in msg:
+        return JSONResponse({"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid request"}}, status_code=400)
+    method, params, request_id = msg["method"], msg.get("params", {}), msg["id"]
+    if not isinstance(params, dict):
+        return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "Invalid params"}}, status_code=400)
+    meta = params.get("_meta", {})
+    if not isinstance(meta, dict) or request.headers.get("mcp-protocol-version") != MCP_VERSION or meta.get("io.modelcontextprotocol/protocolVersion") != MCP_VERSION:
+        return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32020, "message": "Unsupported/mismatched protocol version"}}, status_code=400)
+    if not isinstance(meta.get("io.modelcontextprotocol/clientInfo"), dict) or not isinstance(meta.get("io.modelcontextprotocol/clientCapabilities"), dict):
+        return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "Missing client metadata"}}, status_code=400)
+    if request.headers.get("mcp-method") != method:
+        return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32020, "message": "Method header mismatch"}}, status_code=400)
+    if method == "tools/list":
+        result = {"resultType": "complete", "tools": MCP_TOOL_DEFINITIONS}
+    elif method == "tools/call":
+        name, arguments = params.get("name"), params.get("arguments", {})
+        if not isinstance(name, str) or request.headers.get("mcp-name") != name:
+            return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32020, "message": "Tool name header mismatch"}}, status_code=400)
+        if not isinstance(arguments, dict) or name not in {tool["name"] for tool in MCP_TOOL_DEFINITIONS}:
+            return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "Invalid tool or arguments"}}, status_code=400)
+        if name == "search_agents":
+            capability = arguments.get("capability")
+            if arguments.keys() - {"capability"} or (capability is not None and (not isinstance(capability, str) or len(capability) > 64)):
+                return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "Invalid capability"}}, status_code=400)
+            async with state_lock:
+                matches = [{"agent_id": k, "capabilities": p["capabilities"], "pricing": p["pricing"], "identity_verified": True} for k, p in agent_profiles.items() if p.get("identity_verified") and (not capability or capability in p["capabilities"])]
+            data = {"agents": matches[:100], "count": len(matches), "persistent": False}
+        elif name == "marketplace_status":
+            if arguments:
+                return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "No arguments expected"}}, status_code=400)
+            data = await health_check()
+            data["fee_rate"] = 0.02
+            data["payment_status"] = "not_implemented"
+        else:
+            if arguments:
+                return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "No arguments expected"}}, status_code=400)
+            data = await auth_guide()
+        result = {"resultType": "complete", "content": [{"type": "text", "text": json.dumps(data, separators=(",", ":"))}], "structuredContent": data, "isError": False}
+    else:
+        return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": "Method not found"}}, status_code=404)
+    return {"jsonrpc": "2.0", "id": request_id, "result": result}
 
 @app.websocket("/ws/registry")
 async def agent_registry_endpoint(websocket: WebSocket):
