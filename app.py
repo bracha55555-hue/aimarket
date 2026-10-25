@@ -1,4 +1,4 @@
-import os, asyncio, urllib.request, json, uuid, math, logging, base64
+import os, asyncio, urllib.request, json, uuid, math, logging, base64, time
 from collections import Counter
 from contextlib import asynccontextmanager
 import uvicorn
@@ -36,6 +36,7 @@ agent_reputation: Dict[str, dict] = {}
 active_trades: Dict[str, dict] = {}
 MAX_AGENTS = 200
 MAX_TRADES = 1000
+TRADE_TTL_SECONDS = 3600
 MAX_MESSAGE_BYTES = 16384
 logger = logging.getLogger('aimarket')
 state_lock = asyncio.Lock()
@@ -50,6 +51,21 @@ async def keep_alive_worker():
         if url:
             try: await asyncio.to_thread(urllib.request.urlopen, f"{url}/health", timeout=10)
             except Exception: pass
+
+def expire_stale_trades(now=None):
+    """Expire volatile requests; this is not a durable financial ledger."""
+    current = time.monotonic() if now is None else now
+    expired = [tid for tid, trade in active_trades.items()
+               if current - trade.get("created_monotonic", current) >= TRADE_TTL_SECONDS]
+    for tid in expired:
+        active_trades.pop(tid, None)
+    return len(expired)
+
+async def stale_order_reaper():
+    while True:
+        await asyncio.sleep(60)
+        async with state_lock:
+            expire_stale_trades()
 
 async def global_discovery_broadcaster():
     """מנגנון דמוי DHCP/DNS: השרת מכריז באופן פעיל ברשת שהוא המרכז העולמי לכל עסקאות הסוכנים"""
@@ -111,6 +127,7 @@ async def autonomous_seller_agent(agent_id: str, cap_offered: str):
 async def lifespan(app: FastAPI):
     asyncio.create_task(keep_alive_worker())
     asyncio.create_task(global_discovery_broadcaster())
+    asyncio.create_task(stale_order_reaper())
     if os.getenv("ENABLE_INTERNAL_DEMO_AGENTS", "0") == "1":
         asyncio.create_task(autonomous_buyer_agent("ResearchBot", "web_scraping"))
         asyncio.create_task(autonomous_seller_agent("ScraperBot", "web_scraping"))
@@ -133,7 +150,7 @@ async def ai_plugin_manifest():
 
 @app.get("/health")
 async def health_check():
-    async with state_lock: return {"status": "online", "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False}
+    async with state_lock: return {"status": "online", "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
 
 def execute_automated_trade(buyer_private_key: str, seller_address: str, amount_wei: int):
     raise RuntimeError("Legacy private-key custody and non-atomic live transfers are disabled for safety")
@@ -195,7 +212,7 @@ async def process_trade_fees(tx: TradeTransaction):
 
 @app.get("/")
 async def service_index():
-    return {"service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "not implemented", "escrow": False}
+    return {"service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "not implemented", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
@@ -272,7 +289,7 @@ async def auth_guide():
             "Receive auth_challenge with exact message. Sign message using EIP-191 personal_sign locally. Never send a private key.",
             "Send JSON: {action: authenticate, signature: 0x-prefixed ECDSA signature} within 60 seconds.",
             "Receive status registered with identity_verified true. Discovery, requests, delivery and receipt confirmation then become available.",
-            "No escrow, payment verification, persistent order storage, or actual disbursements are provided. Do not accept unpaid orders as settled."
+            "No escrow, payment verification, persistent order storage, or actual disbursements are provided. Orders expire automatically after one hour. Do not accept unpaid orders as settled."
         ],
         "identity": "Ethereum address for authentication only; services may be priced in BTC, ETH, SOL, or TRX.",
         "registration": {"agent_id": "0x<your_eth_address>", "capabilities": ["your_service"], "pricing": {"your_service": 0.01}},
@@ -439,6 +456,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
                     continue
                 error = None
                 async with state_lock:
+                    expire_stale_trades()
                     seller_ws = active_agents.get(tx.seller_agent)
                     profile = agent_profiles.get(tx.seller_agent)
                     pricing = profile.get("pricing", {}) if isinstance(profile, dict) else {}
@@ -454,13 +472,13 @@ async def agent_registry_endpoint(websocket: WebSocket):
                         trade_id = str(uuid.uuid4())
                         safe_data = tx.model_dump() if hasattr(tx, "model_dump") else tx.dict()
                         safe_data.pop("buyer_private_key", None)
-                        active_trades[trade_id] = {"status": "pending", "buyer": agent_id, "seller": tx.seller_agent, "data": safe_data}
+                        active_trades[trade_id] = {"status": "pending", "buyer": agent_id, "seller": tx.seller_agent, "data": safe_data, "created_monotonic": time.monotonic()}
                 if error:
                     await websocket.send_json({"error": error})
                     continue
                 try:
                     await seller_ws.send_json({"event": "trade_requested", "trade_id": trade_id, "buyer": agent_id, "item": tx.item_name})
-                    await websocket.send_json({"event": "trade_created", "trade_id": trade_id, "status": "pending"})
+                    await websocket.send_json({"event": "trade_created", "trade_id": trade_id, "status": "pending", "expires_in_seconds": TRADE_TTL_SECONDS, "settlement_verified": False})
                 except Exception:
                     async with state_lock: active_trades.pop(trade_id, None)
                     await websocket.send_json({"error": "seller_delivery_failed"})
