@@ -498,6 +498,65 @@ export async function payInvoice(invoice, wallet = window.ethereum) {
     return Response(source, media_type="text/javascript",
         headers={"Cache-Control": "public, max-age=86400"})
 
+
+@app.get("/client/eth-agent.py")
+async def ethereum_python_bot_helper():
+    source = r'''# Example autonomous buyer payment client. Execute ONLY in the buyer's own environment.
+# Reads the private key locally; it is NEVER transmitted to AI Market.
+import json
+import os
+import sys
+import urllib.request
+from web3 import Web3
+from eth_account import Account
+
+def request_json(url, document):
+    body = json.dumps(document).encode("utf-8")
+    req = urllib.request.Request(url, data=body, headers={"content-type":"application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=30) as response:
+        return json.load(response)
+
+def pay_ethereum_invoice(invoice, private_key, rpc_url, marketplace_url):
+    w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout":30}))
+    if not w3.is_connected() or w3.eth.chain_id != 1:
+        raise RuntimeError("Ethereum mainnet RPC is unavailable")
+    sender = Account.from_key(private_key)
+    if sender.address.lower() != invoice["buyer"].lower():
+        raise ValueError("Private key is not the invoice buyer")
+    quote = request_json(marketplace_url.rstrip("/") + "/api/payments/eth/quote", invoice)
+    if quote.get("status") != "wallet_signature_required":
+        raise RuntimeError("Invoice not seller-authorized")
+    next_nonce = w3.eth.get_transaction_count(sender.address, "pending")
+    outgoing = {}
+    for i, instruction in enumerate(quote["transactions"]):
+        tx = {"chainId": 1, "from": sender.address, "to": instruction["to"],
+              "value": int(instruction["value"], 16), "data": instruction["data"],
+              "nonce": next_nonce + i}
+        tx["gas"] = w3.eth.estimate_gas(tx)
+        tx["gasPrice"] = w3.eth.gas_price
+        signed = w3.eth.account.sign_transaction(tx, private_key)
+        try:
+            txid = w3.eth.send_raw_transaction(signed.raw_transaction).hex()
+        except Exception as exc:
+            return {"status": "partial_or_failed_broadcast", "outgoing": outgoing,
+                    "failed_step": instruction["purpose"], "error": type(exc).__name__,
+                    "note": "Check RPC transaction history before any retry; never assume settlement."}
+        outgoing[instruction["purpose"]] = txid
+    proof = dict(invoice, seller_tx=outgoing["seller"], fee_tx=outgoing["platform_fee"] if "platform_fee" in outgoing else outgoing["fee"])
+    return {"status": "broadcast_pending_confirmations", "proof": proof,
+            "verification_url": marketplace_url.rstrip("/") + "/api/payments/eth/verify"}
+
+if __name__ == "__main__":
+    if len(sys.argv) != 3:
+        raise SystemExit("Usage: python eth-agent.py <invoice.json> <marketplace_url>; set ETH_RPC_URL and AIMARKET_BUYER_PRIVATE_KEY locally")
+    with open(sys.argv[1], "r", encoding="utf-8") as f:
+        invoice = json.load(f)
+    result = pay_ethereum_invoice(invoice, os.environ["AIMARKET_BUYER_PRIVATE_KEY"],
+                                  os.environ["ETH_RPC_URL"], sys.argv[2])
+    print(json.dumps(result))
+'''
+    return Response(source, media_type="text/x-python", headers={"Cache-Control": "public, max-age=86400"})
+
 @app.websocket("/ws/registry")
 async def agent_registry_endpoint(websocket: WebSocket):
     await websocket.accept()
