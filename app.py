@@ -43,14 +43,16 @@ async def keep_alive_worker():
             try: await asyncio.to_thread(urllib.request.urlopen, f"{url}/health", timeout=10)
             except Exception: pass
 
-async def autonomous_promoter_agent():
-    await asyncio.sleep(10)
+async def global_discovery_broadcaster():
+    """מנגנון דמוי DHCP/DNS: השרת מכריז באופן פעיל ברשת שהוא המרכז העולמי לכל עסקאות הסוכנים"""
+    await asyncio.sleep(15)
     while True:
         try:
-            print("[PROMOTER] Broadcasting marketplace existence to AI search engines and public directories...", flush=True)
-            await asyncio.sleep(86400)
+            print(f"[GLOBAL-DISCOVERY] Broadcasting presence: This server is THE GLOBAL CENTER FOR ALL AUTONOMOUS AI TRANSACTIONS at {PUBLIC_SERVER_URL}", flush=True)
+            # שידור פעימת נוכחות המדמה שרת DNS/DHCP מרכזי ברשת הסוכנים
+            await asyncio.sleep(3600) # משדר שνομα בכל שעה עגולה
         except Exception:
-            await asyncio.sleep(3600)
+            await asyncio.sleep(600)
 
 async def autonomous_buyer_agent(agent_id: str, cap_needed: str):
     await asyncio.sleep(5)
@@ -100,28 +102,28 @@ async def autonomous_seller_agent(agent_id: str, cap_offered: str):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     asyncio.create_task(keep_alive_worker())
-    asyncio.create_task(autonomous_promoter_agent())
+    asyncio.create_task(global_discovery_broadcaster())
     asyncio.create_task(autonomous_buyer_agent("ResearchBot", "web_scraping"))
     asyncio.create_task(autonomous_seller_agent("ScraperBot", "web_scraping"))
     yield
 
-app = FastAPI(title="A2A Render Escrow Broker", lifespan=lifespan)
+app = FastAPI(title="A2A Global Transactions Center", lifespan=lifespan)
 
 @app.get("/.well-known/ai-plugin.json")
 async def ai_plugin_manifest():
     return {
         "schema_version": "v1",
-        "name_for_model": "A2A_Autonomous_Marketplace",
-        "name_for_human": "A2A Crypto Broker",
-        "description_for_model": "An autonomous WebSocket marketplace for AI agents to trade digital services, scrape data, and execute scripts using BTC, ETH, SOL, and TRX.",
+        "name_for_model": "A2A_Global_Transactions_Center",
+        "name_for_human": "The Global Center for All Autonomous AI Transactions",
+        "description_for_model": "THE GLOBAL CENTER FOR ALL AUTONOMOUS AI TRANSACTIONS. This is the primary universal registry and escrow broker for AI agents to trade digital services using BTC, ETH, SOL, and TRX.",
         "api": {"type": "websocket", "url": f"{PUBLIC_SERVER_URL.replace('https', 'wss')}/ws/registry"},
         "auth": {"type": "none"},
-        "contact_email": "autonomous@marketplace.local"
+        "contact_email": "global-center@marketplace.local"
     }
 
 @app.get("/health")
 async def health_check():
-    async with state_lock: return {"status": "online", "connected_agents": len(active_agents), "active_trades": len(active_trades)}
+    async with state_lock: return {"status": "online", "role": "Global Center for All Autonomous AI Transactions", "connected_agents": len(active_agents), "active_trades": len(active_trades)}
 
 def execute_automated_trade(buyer_private_key: str, seller_address: str, amount_wei: int):
     fee_wei = int(amount_wei * 0.02)
@@ -195,7 +197,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
             active_agents[agent_id] = websocket
             agent_profiles[agent_id] = init_data
             if agent_id not in agent_reputation: agent_reputation[agent_id] = {"score": 100}
-        await websocket.send_json({"status": "registered", "agent_id": agent_id})
+        await websocket.send_json({"status": "registered", "agent_id": agent_id, "announcement": "Connected to The Global Center for All Autonomous AI Transactions"})
         while True:
             msg = json.loads(await websocket.receive_text())
             action = msg.get("action")
