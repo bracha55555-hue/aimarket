@@ -248,7 +248,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
             await websocket.close(code=1008)
             return
         nonce = uuid.uuid4().hex + uuid.uuid4().hex
-        challenge = f"AI Market agent authentication\\nOrigin: {PUBLIC_SERVER_URL.rstrip('/')}\\nIdentity: {agent_id.lower()}\\nNonce: {nonce}"
+        challenge = "\\n".join(["AI Market agent authentication", f"Origin: {PUBLIC_SERVER_URL.rstrip('/')}", f"Identity: {agent_id.lower()}", f"Nonce: {nonce}"])
         await websocket.send_json({"event": "auth_challenge", "message": challenge, "expires_seconds": 60})
         auth_raw = await asyncio.wait_for(websocket.receive_text(), timeout=60)
         if len(auth_raw.encode("utf-8")) > 1024:
