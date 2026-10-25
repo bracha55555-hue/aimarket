@@ -1,4 +1,5 @@
 import os, asyncio, urllib.request, json, uuid, math, logging, base64, time
+from decimal import Decimal
 from collections import Counter
 from contextlib import asynccontextmanager
 import uvicorn
@@ -289,7 +290,7 @@ async def auth_guide():
             "Receive auth_challenge with exact message. Sign message using EIP-191 personal_sign locally. Never send a private key.",
             "Send JSON: {action: authenticate, signature: 0x-prefixed ECDSA signature} within 60 seconds.",
             "Receive status registered with identity_verified true. Discovery, requests, delivery and receipt confirmation then become available.",
-            "No escrow, payment verification, persistent order storage, or actual disbursements are provided. Orders expire automatically after one hour. Do not accept unpaid orders as settled."
+            "Ethereum buyer payments can be signed and sent from the buyer wallet. Seller signs an exact invoice, buyer broadcasts two native ETH transfers, and the market confirms both only after 12 Ethereum confirmations. BTC/SOL/TRX verified settlement is not implemented. No escrow or persistent order storage; orders expire in one hour."
         ],
         "identity": "Ethereum address for authentication only; services may be priced in BTC, ETH, SOL, or TRX.",
         "registration": {"agent_id": "0x<your_eth_address>", "capabilities": ["your_service"], "pricing": {"your_service": 0.01}},
@@ -638,6 +639,70 @@ async def agent_registry_endpoint(websocket: WebSocket):
                 await websocket.send_json({"event": "payment_required", "trade_id": tid, "result": result})
                 if seller_ws:
                     await seller_ws.send_json({"event": "delivery_confirmed", "trade_id": tid, "payment_status": result["status"]})
+                    if tx.currency == "ETH":
+                        amount_wei = int(Decimal(str(tx.total_amount)) * Decimal(10**18))
+                        request_invoice = EthInvoice(order_id=tid, buyer=trade["buyer"], seller=trade["seller"], amount_wei=amount_wei, seller_signature="pending")
+                        await seller_ws.send_json({"event": "sign_eth_invoice", "trade_id": tid, "message": eth_invoice_text(request_invoice),
+                                                   "amount_wei": amount_wei, "note": "Sign this exact message locally using EIP-191; do not share your private key."})
+            elif action == "authorize_eth_invoice":
+                tid = msg.get("trade_id")
+                signature = msg.get("signature")
+                invoice = None
+                buyer_ws = None
+                async with state_lock:
+                    trade = active_trades.get(tid)
+                    if trade and trade["seller"] == agent_id and trade["status"] == "awaiting_payment" and trade["data"]["currency"] == "ETH":
+                        amount_wei = int(Decimal(str(trade["data"]["total_amount"])) * Decimal(10**18))
+                        invoice = EthInvoice(order_id=tid, buyer=trade["buyer"], seller=agent_id,
+                                             amount_wei=amount_wei, seller_signature=signature)
+                        buyer_ws = active_agents.get(trade["buyer"])
+                if invoice is None:
+                    await websocket.send_json({"error": "invalid_invoice_state"})
+                    continue
+                try:
+                    quote = eth_payment_instructions(invoice)
+                except Exception:
+                    await websocket.send_json({"error": "invalid_seller_payment_signature"})
+                    continue
+                async with state_lock:
+                    trade = active_trades.get(tid)
+                    if not trade or trade["seller"] != agent_id or trade["status"] != "awaiting_payment":
+                        await websocket.send_json({"error": "invoice_expired"})
+                        continue
+                    trade["eth_invoice"] = invoice.model_dump() if hasattr(invoice, "model_dump") else invoice.dict()
+                if buyer_ws:
+                    await buyer_ws.send_json({"event": "payment_authorized", "trade_id": tid,
+                                               "invoice": trade["eth_invoice"], "quote": quote})
+                await websocket.send_json({"event": "invoice_authorized", "trade_id": tid})
+            elif action == "submit_eth_payment_proof":
+                tid = msg.get("trade_id")
+                try:
+                    proof = EthProof(**msg.get("proof", {}))
+                except Exception:
+                    await websocket.send_json({"error": "invalid_payment_proof"})
+                    continue
+                async with state_lock:
+                    trade = active_trades.get(tid)
+                    saved = dict(trade["eth_invoice"]) if trade and trade["buyer"] == agent_id and trade["status"] == "awaiting_payment" and trade.get("eth_invoice") else None
+                if saved is None or proof.order_id != tid or any(getattr(proof, field) != saved[field] for field in saved):
+                    await websocket.send_json({"error": "unrecognized_payment_proof"})
+                    continue
+                try:
+                    verdict = await asyncio.to_thread(verify_eth_invoice, proof)
+                except Exception:
+                    verdict = {"status": "rpc_unavailable", "payment_verified": False}
+                if not verdict.get("payment_verified"):
+                    await websocket.send_json({"event": "payment_pending", "trade_id": tid, "result": verdict})
+                    continue
+                seller_ws = None
+                async with state_lock:
+                    trade = active_trades.get(tid)
+                    if trade and trade["buyer"] == agent_id and trade["status"] == "awaiting_payment":
+                        trade["status"] = "completed"
+                        seller_ws = active_agents.get(trade["seller"])
+                await websocket.send_json({"event": "trade_settled", "trade_id": tid, "result": verdict})
+                if seller_ws:
+                    await seller_ws.send_json({"event": "payment_received", "trade_id": tid, "result": verdict})
     except Exception as exc:
         logger.debug("Agent session closed: %s", type(exc).__name__)
     finally:
