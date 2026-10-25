@@ -291,7 +291,7 @@ async def auth_guide():
             "Receive auth_challenge with exact message. Sign message using EIP-191 personal_sign locally. Never send a private key.",
             "Send JSON: {action: authenticate, signature: 0x-prefixed ECDSA signature} within 60 seconds.",
             "Receive status registered with identity_verified true. Discovery, requests, delivery and receipt confirmation then become available.",
-            "Ethereum buyer payments can be signed and sent from the buyer wallet. Seller signs an exact invoice, buyer broadcasts two native ETH transfers, and the market confirms both only after 12 Ethereum confirmations. BTC/SOL/TRX verified settlement is not implemented. No escrow or persistent order storage; orders expire in one hour."
+            "All four native coins have client-side signed payment instructions and on-chain verification. Solana and BTC use atomic multi-output single transactions; ETH and TRX use two transfers, which can be partial. The original buyer retains payment hashes and seller-signed invoices. No custodial escrow and no durable central order database; order coordination expires in one hour."
         ],
         "identity": "Ethereum address for authentication only; services may be priced in BTC, ETH, SOL, or TRX.",
         "registration": {"agent_id": "0x<your_eth_address>", "capabilities": ["your_service"], "pricing": {"your_service": 0.01}},
@@ -1097,6 +1097,9 @@ async def agent_registry_endpoint(websocket: WebSocket):
                 await websocket.send_json({"event": "payment_required", "trade_id": tid, "result": result})
                 if seller_ws:
                     await seller_ws.send_json({"event": "delivery_confirmed", "trade_id": tid, "payment_status": result["status"]})
+                    if tx.currency in ("SOL", "TRX"):
+                        await buyer_ws.send_json({"event": "native_payer_required", "trade_id": tid,
+                                 "currency": tx.currency, "note": "Declare your chain wallet address. Never send private keys."})
                     if tx.currency == "BTC":
                         amount_sats = int(Decimal(str(tx.total_amount)) * Decimal(100000000))
                         await seller_ws.send_json({"event": "btc_invoice_needed", "trade_id": tid, "buyer": trade["buyer"],
@@ -1108,6 +1111,107 @@ async def agent_registry_endpoint(websocket: WebSocket):
                         request_invoice = EthInvoice(order_id=tid, buyer=trade["buyer"], seller=trade["seller"], amount_wei=amount_wei, seller_signature="pending")
                         await seller_ws.send_json({"event": "sign_eth_invoice", "trade_id": tid, "message": eth_invoice_text(request_invoice),
                                                    "amount_wei": amount_wei, "note": "Sign this exact message locally using EIP-191; do not share your private key."})
+            elif action == "declare_native_payer":
+                tid = msg.get("trade_id")
+                chain_payer = msg.get("payer_address")
+                seller_ws = None
+                request = None
+                async with state_lock:
+                    trade = active_trades.get(tid)
+                    if trade and trade["buyer"] == agent_id and trade["status"] == "awaiting_payment" and trade["data"]["currency"] in ("SOL","TRX"):
+                        currency = trade["data"]["currency"]
+                        valid = ((isinstance(chain_payer,str) and len(chain_payer)<=90 and
+                                  (currency == "SOL" and len(chain_payer)>=32 and
+                                   str(SolPubkey.from_string(chain_payer))==chain_payer))
+                                 if currency == "SOL" else
+                                 (isinstance(chain_payer,str) and Tron.is_base58check_address(chain_payer)))
+                        if valid:
+                            trade["payer_address"] = chain_payer
+                            seller_ws=active_agents.get(trade["seller"])
+                            units=int(Decimal(str(trade["data"]["total_amount"]))*
+                                      (Decimal(1000000000) if currency=="SOL" else Decimal(1000000)))
+                            request={"event":"native_invoice_needed","trade_id":tid,"currency":currency,
+                                "buyer":trade["buyer"],"seller":trade["seller"],
+                                "payer_address":chain_payer,"amount_units":units,
+                                "quote_endpoint":"/api/payments/native/quote",
+                                "message_endpoint":"/api/payments/native/sign-message"}
+                if not request:
+                    await websocket.send_json({"error":"invalid_native_payer_or_trade"})
+                    continue
+                if seller_ws: await seller_ws.send_json(request)
+                await websocket.send_json({"event":"native_payer_registered","trade_id":tid})
+            elif action == "authorize_native_invoice":
+                tid=msg.get("trade_id")
+                address=msg.get("seller_payout_address")
+                signature=msg.get("signature")
+                invoice=None
+                buyer_ws=None
+                async with state_lock:
+                    trade=active_trades.get(tid)
+                    if trade and trade["seller"]==agent_id and trade["status"]=="awaiting_payment" and trade["data"]["currency"] in ("SOL","TRX") and trade.get("payer_address"):
+                        currency=trade["data"]["currency"]
+                        units=int(Decimal(str(trade["data"]["total_amount"]))*
+                            (Decimal(1000000000) if currency=="SOL" else Decimal(1000000)))
+                        try:
+                            invoice=AltInvoice(currency=currency,order_id=tid,buyer=trade["buyer"],
+                                seller=agent_id,payer_address=trade["payer_address"],
+                                seller_payout_address=address,amount_units=units,
+                                seller_signature=signature)
+                        except Exception:
+                            invoice=None
+                        buyer_ws=active_agents.get(trade["buyer"])
+                if invoice is None:
+                    await websocket.send_json({"error":"invalid_native_invoice_state"})
+                    continue
+                try: quote=alt_invoice_quote(invoice)
+                except Exception:
+                    await websocket.send_json({"error":"invalid_native_invoice_signature_or_address"})
+                    continue
+                async with state_lock:
+                    trade=active_trades.get(tid)
+                    if not trade or trade["seller"]!=agent_id or trade["status"]!="awaiting_payment":
+                        await websocket.send_json({"error":"native_invoice_expired"})
+                        continue
+                    trade["native_invoice"]=invoice.model_dump() if hasattr(invoice,"model_dump") else invoice.dict()
+                    saved_invoice=dict(trade["native_invoice"])
+                if buyer_ws:
+                    await buyer_ws.send_json({"event":"native_payment_authorized","trade_id":tid,
+                                              "invoice":saved_invoice,"quote":quote})
+                await websocket.send_json({"event":"native_invoice_authorized","trade_id":tid})
+            elif action == "submit_native_payment_proof":
+                tid=msg.get("trade_id")
+                try: proof=AltProof(**msg.get("proof",{}))
+                except Exception:
+                    await websocket.send_json({"error":"invalid_native_payment_proof"})
+                    continue
+                async with state_lock:
+                    trade=active_trades.get(tid)
+                    saved=dict(trade["native_invoice"]) if trade and trade["buyer"]==agent_id and trade["status"]=="awaiting_payment" and trade.get("native_invoice") else None
+                if saved is None or proof.order_id!=tid or any(getattr(proof,k)!=v for k,v in saved.items()):
+                    await websocket.send_json({"error":"unrecognized_native_payment_proof"})
+                    continue
+                try:
+                    verifier=verify_solana_payment if proof.currency=="SOL" else verify_tron_payment
+                    verdict=await asyncio.to_thread(verifier,proof)
+                except Exception:
+                    verdict={"status":"verification_unavailable","payment_verified":False}
+                if not verdict.get("payment_verified"):
+                    await websocket.send_json({"event":"payment_pending","trade_id":tid,"result":verdict})
+                    continue
+                seller_ws=None
+                complete=False
+                async with state_lock:
+                    trade=active_trades.get(tid)
+                    if trade and trade["buyer"]==agent_id and trade["status"]=="awaiting_payment" and trade.get("native_invoice")==saved:
+                        trade["status"]="completed"
+                        seller_ws=active_agents.get(trade["seller"])
+                        complete=True
+                if not complete:
+                    await websocket.send_json({"error":"payment_trade_expired"})
+                    continue
+                await websocket.send_json({"event":"trade_settled","trade_id":tid,"result":verdict})
+                if seller_ws:
+                    await seller_ws.send_json({"event":"payment_received","trade_id":tid,"result":verdict})
             elif action == "authorize_btc_invoice":
                 tid, destination, signature = msg.get("trade_id"), msg.get("seller_btc_address"), msg.get("signature")
                 invoice, buyer_ws = None, None
