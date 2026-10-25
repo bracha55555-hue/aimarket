@@ -1,4 +1,5 @@
-import os, asyncio, urllib.request, json, uuid, math, logging
+import os, asyncio, urllib.request, json, uuid, math, logging, base64
+from collections import Counter
 from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, WebSocket, Request
@@ -190,17 +191,72 @@ async def process_trade_fees(tx: TradeTransaction):
 
 @app.get("/")
 async def service_index():
-    return {"service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "not implemented", "escrow": False}
+    return {"service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "not implemented", "escrow": False}
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "warning": "Do not send private keys. Payment settlement is not implemented."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "warning": "Do not send private keys. Payment settlement is not implemented."}
+
+def encode_n4_directory(safe):
+    # Lossless, optional compact representation for non-financial service metadata.
+    # At most 15 common exact strings; nibble 15 escapes to an exact original string.
+    dictionary = [word for word, _ in sorted(
+        Counter(word for profile in safe.values() for word in profile["capabilities"]).items(),
+        key=lambda entry: (-entry[1], entry[0]))[:15]]
+    vocabulary = {word: pos for pos, word in enumerate(dictionary)}
+    rows = []
+    for agent_id, profile in safe.items():
+        capabilities = profile["capabilities"]
+        digits = [vocabulary.get(word, 15) for word in capabilities]
+        packed = bytes(((digits[i] << 4) | (digits[i + 1] if i + 1 < len(digits) else 15)) for i in range(0, len(digits), 2))
+        encoded = base64.b64encode(packed).decode("ascii").rstrip("=")
+        unusual = [word for word in capabilities if word not in vocabulary]
+        prices = [profile["pricing"].get(word) for word in capabilities]
+        rows.append([agent_id, encoded, len(capabilities), unusual, prices])
+    return {"codec": "N4-v1", "dictionary": dictionary, "agents": rows, "count": len(rows),
+            "decoder": "/client/n4.js", "lossless": True,
+            "note": "Optional 4-bit dictionary applies only to discovery labels, never to monetary values, wallet addresses or signatures."}
 
 @app.get("/api/agents")
-async def public_agents():
+async def public_agents(format: str = "full"):
+    if format not in ("full", "n4"):
+        return JSONResponse({"error": "unsupported_directory_format", "supported": ["full", "n4"]}, status_code=400)
     async with state_lock:
-        safe = {agent_id: {"capabilities": profile["capabilities"], "pricing": profile["pricing"], "identity_verified": True} for agent_id, profile in agent_profiles.items() if profile.get("identity_verified")}
+        safe = {agent_id: {"capabilities": list(profile["capabilities"]), "pricing": dict(profile["pricing"]), "identity_verified": True} for agent_id, profile in agent_profiles.items() if profile.get("identity_verified")}
+    if format == "n4":
+        return encode_n4_directory(safe)
     return {"agents": safe, "count": len(safe), "note": "Verified Ethereum identity proves key ownership, not service quality. Payments and trades are not persisted."}
+
+@app.get("/client/n4.js")
+async def n4_client_decoder():
+    decoder = r'''// Lossless N4-v1 service discovery decoder. No dependencies and no private keys.
+export function decodeN4(document) {
+  if (document.codec !== "N4-v1") return document;
+  const vocabulary = document.dictionary;
+  const result = {};
+  for (const [id, encoded, count, unusual, costs] of document.agents) {
+    const buffer = atob(encoded + "=".repeat((4 - encoded.length % 4) % 4));
+    const capabilities = [];
+    let fallback = 0;
+    for (let i = 0; i < count; i++) {
+      const value = buffer.charCodeAt(i >> 1);
+      const index = i % 2 ? value & 15 : value >> 4;
+      const term = index === 15 ? unusual[fallback++] : vocabulary[index];
+      if (typeof term !== "string") throw new Error("Invalid N4 dictionary");
+      capabilities.push(term);
+    }
+    if (fallback !== unusual.length || costs.length !== capabilities.length)
+      throw new Error("Invalid N4 record length");
+    const pricing = {};
+    capabilities.forEach((term, index) => {
+      if (costs[index] !== null) pricing[term] = costs[index];
+    });
+    result[id] = {capabilities, pricing, identity_verified: true};
+  }
+  return {agents: result, count: document.count, codec: "decoded-N4-v1"};
+}
+'''
+    return Response(decoder, media_type="text/javascript", headers={"Cache-Control": "public, max-age=86400"})
 
 @app.get("/api/auth-guide")
 async def auth_guide():
