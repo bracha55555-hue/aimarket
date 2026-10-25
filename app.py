@@ -605,6 +605,13 @@ def btc_invoice_quote(i):
             {"purpose": "platform_fee", "address": FEE_WALLETS["BTC"], "value_sats": fee}],
         "warning": "Buyer must construct ONE Bitcoin transaction with both outputs and the exact OP_RETURN commitment; confirmation requires 6 blocks."}
 
+@app.post("/api/payments/btc/sign-message")
+async def btc_sign_message_endpoint(invoice: BtcInvoice):
+    if not Web3.is_address(invoice.seller) or not Web3.is_address(invoice.buyer):
+        return JSONResponse({"error": "invalid_identity"}, status_code=422)
+    return {"message": btc_invoice_message(invoice),
+            "note": "Seller must sign message using EIP-191 on their own wallet; signature then goes in /api/payments/btc/quote."}
+
 @app.post("/api/payments/btc/quote")
 async def btc_quote_endpoint(invoice: BtcInvoice):
     try:
@@ -829,11 +836,77 @@ async def agent_registry_endpoint(websocket: WebSocket):
                 await websocket.send_json({"event": "payment_required", "trade_id": tid, "result": result})
                 if seller_ws:
                     await seller_ws.send_json({"event": "delivery_confirmed", "trade_id": tid, "payment_status": result["status"]})
+                    if tx.currency == "BTC":
+                        amount_sats = int(Decimal(str(tx.total_amount)) * Decimal(100000000))
+                        await seller_ws.send_json({"event": "btc_invoice_needed", "trade_id": tid, "buyer": trade["buyer"],
+                                "seller": trade["seller"], "amount_sats": amount_sats,
+                                "sign_message_endpoint": "/api/payments/btc/sign-message",
+                                "note": "Choose your own BTC payout address and sign the invoice message with EIP-191. Do not send private keys."})
                     if tx.currency == "ETH":
                         amount_wei = int(Decimal(str(tx.total_amount)) * Decimal(10**18))
                         request_invoice = EthInvoice(order_id=tid, buyer=trade["buyer"], seller=trade["seller"], amount_wei=amount_wei, seller_signature="pending")
                         await seller_ws.send_json({"event": "sign_eth_invoice", "trade_id": tid, "message": eth_invoice_text(request_invoice),
                                                    "amount_wei": amount_wei, "note": "Sign this exact message locally using EIP-191; do not share your private key."})
+            elif action == "authorize_btc_invoice":
+                tid, destination, signature = msg.get("trade_id"), msg.get("seller_btc_address"), msg.get("signature")
+                invoice, buyer_ws = None, None
+                async with state_lock:
+                    trade = active_trades.get(tid)
+                    if trade and trade["seller"] == agent_id and trade["status"] == "awaiting_payment" and trade["data"]["currency"] == "BTC":
+                        amount_sats = int(Decimal(str(trade["data"]["total_amount"])) * Decimal(100000000))
+                        try:
+                            invoice = BtcInvoice(order_id=tid, buyer=trade["buyer"], seller=agent_id,
+                                  seller_btc_address=destination, amount_sats=amount_sats, seller_signature=signature)
+                        except Exception:
+                            invoice = None
+                        buyer_ws = active_agents.get(trade["buyer"])
+                if invoice is None:
+                    await websocket.send_json({"error": "invalid_btc_invoice"})
+                    continue
+                try:
+                    quote = btc_invoice_quote(invoice)
+                except Exception:
+                    await websocket.send_json({"error": "invalid_btc_signature_or_destination"})
+                    continue
+                async with state_lock:
+                    trade = active_trades.get(tid)
+                    if not trade or trade["seller"] != agent_id or trade["status"] != "awaiting_payment":
+                        await websocket.send_json({"error": "invoice_expired"})
+                        continue
+                    trade["btc_invoice"] = invoice.model_dump() if hasattr(invoice, "model_dump") else invoice.dict()
+                if buyer_ws:
+                    await buyer_ws.send_json({"event": "btc_payment_authorized", "trade_id": tid,
+                             "invoice": trade["btc_invoice"], "quote": quote})
+                await websocket.send_json({"event": "btc_invoice_authorized", "trade_id": tid})
+            elif action == "submit_btc_payment_proof":
+                tid = msg.get("trade_id")
+                try:
+                    proof = BtcProof(**msg.get("proof", {}))
+                except Exception:
+                    await websocket.send_json({"error": "invalid_btc_payment_proof"})
+                    continue
+                async with state_lock:
+                    trade = active_trades.get(tid)
+                    saved = dict(trade["btc_invoice"]) if trade and trade["buyer"] == agent_id and trade["status"] == "awaiting_payment" and trade.get("btc_invoice") else None
+                if saved is None or proof.order_id != tid or any(getattr(proof, k) != v for k, v in saved.items()):
+                    await websocket.send_json({"error": "unknown_btc_payment_proof"})
+                    continue
+                try:
+                    verdict = await asyncio.to_thread(verify_btc_proof, proof)
+                except Exception:
+                    verdict = {"status": "api_unavailable", "payment_verified": False}
+                if not verdict.get("payment_verified"):
+                    await websocket.send_json({"event": "payment_pending", "trade_id": tid, "result": verdict})
+                    continue
+                seller_ws = None
+                async with state_lock:
+                    trade = active_trades.get(tid)
+                    if trade and trade["buyer"] == agent_id and trade["status"] == "awaiting_payment":
+                        trade["status"] = "completed"
+                        seller_ws = active_agents.get(trade["seller"])
+                await websocket.send_json({"event": "trade_settled", "trade_id": tid, "result": verdict})
+                if seller_ws:
+                    await seller_ws.send_json({"event": "payment_received", "trade_id": tid, "result": verdict})
             elif action == "authorize_eth_invoice":
                 tid = msg.get("trade_id")
                 signature = msg.get("signature")
