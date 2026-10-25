@@ -203,24 +203,47 @@ async def agent_registry_endpoint(websocket: WebSocket):
     await websocket.accept()
     agent_id = None
     try:
-        init_data = json.loads(await websocket.receive_text())
+        raw = await websocket.receive_text()
+        if len(raw.encode("utf-8")) > MAX_MESSAGE_BYTES:
+            await websocket.close(code=1009)
+            return
+        init_data = json.loads(raw)
+        if not isinstance(init_data, dict):
+            await websocket.close(code=1008)
+            return
         agent_id = init_data.get("agent_id")
         if not isinstance(agent_id, str) or not agent_id or len(agent_id) > 64 or any(not (ch.isalnum() or ch in "._-") for ch in agent_id):
             await websocket.close(code=1008)
             return
-        async with state_lock:
-            duplicate = agent_id in active_agents
-            if not duplicate:
-                active_agents[agent_id] = websocket
-                agent_profiles[agent_id] = init_data
-                if agent_id not in agent_reputation: agent_reputation[agent_id] = {"score": 100}
-        if duplicate:
-            await websocket.send_json({"error": "agent_id_already_connected"})
+        capabilities = init_data.get("capabilities", [])
+        pricing = init_data.get("pricing", {})
+        if not isinstance(capabilities, list) or len(capabilities) > 32 or any(not isinstance(x, str) or not x or len(x) > 64 for x in capabilities):
             await websocket.close(code=1008)
             return
-        await websocket.send_json({"status": "registered", "agent_id": agent_id, "announcement": "Connected to The Global Center for All Autonomous AI Transactions"})
+        if not isinstance(pricing, dict) or len(pricing) > 32 or any(k not in capabilities or not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or v <= 0 for k, v in pricing.items()):
+            await websocket.close(code=1008)
+            return
+        safe_profile = {"agent_id": agent_id, "capabilities": capabilities, "pricing": pricing}
+        async with state_lock:
+            reject = "duplicate_id" if agent_id in active_agents else ("registry_full" if len(active_agents) >= MAX_AGENTS else None)
+            if not reject:
+                active_agents[agent_id] = websocket
+                agent_profiles[agent_id] = safe_profile
+                agent_reputation.setdefault(agent_id, {"score": 100})
+        if reject:
+            await websocket.send_json({"error": reject})
+            await websocket.close(code=1008)
+            return
+        await websocket.send_json({"status": "registered", "agent_id": agent_id, "fee_rate": 0.02, "payment_settlement": "not_implemented"})
         while True:
-            msg = json.loads(await websocket.receive_text())
+            raw = await websocket.receive_text()
+            if len(raw.encode("utf-8")) > MAX_MESSAGE_BYTES:
+                await websocket.close(code=1009)
+                return
+            msg = json.loads(raw)
+            if not isinstance(msg, dict):
+                await websocket.send_json({"error": "invalid_message"})
+                continue
             action = msg.get("action")
             if action == "ping": await websocket.send_json({"action": "pong"})
             elif action == "discover":
@@ -245,7 +268,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
                         error = "seller_unavailable_or_incapable"
                     elif not isinstance(pricing, dict) or not isinstance(pricing.get(tx.item_name), (int, float)) or not math.isfinite(pricing[tx.item_name]) or pricing[tx.item_name] != tx.total_amount:
                         error = "price_mismatch"
-                    elif len(active_trades) >= 1000:
+                    elif len(active_trades) >= MAX_TRADES:
                         error = "trade_capacity_reached"
                     elif any(t["buyer"] == agent_id and t["status"] in ("pending", "delivered", "awaiting_payment") for t in active_trades.values()):
                         error = "buyer_has_open_trade"
@@ -259,6 +282,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
                     continue
                 try:
                     await seller_ws.send_json({"event": "trade_requested", "trade_id": trade_id, "buyer": agent_id, "item": tx.item_name})
+                    await websocket.send_json({"event": "trade_created", "trade_id": trade_id, "status": "pending"})
                 except Exception:
                     async with state_lock: active_trades.pop(trade_id, None)
                     await websocket.send_json({"error": "seller_delivery_failed"})
@@ -289,7 +313,9 @@ async def agent_registry_endpoint(websocket: WebSocket):
                 await websocket.send_json({"event": "payment_required", "trade_id": tid, "result": result})
                 if seller_ws:
                     await seller_ws.send_json({"event": "delivery_confirmed", "trade_id": tid, "payment_status": result["status"]})
-    except Exception:
+    except Exception as exc:
+        logger.debug("Agent session closed: %s", type(exc).__name__)
+    finally:
         if agent_id:
             async with state_lock:
                 if active_agents.get(agent_id) is websocket:
