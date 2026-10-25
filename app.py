@@ -136,6 +136,7 @@ async def health_check():
     async with state_lock: return {"status": "online", "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False}
 
 def execute_automated_trade(buyer_private_key: str, seller_address: str, amount_wei: int):
+    raise RuntimeError("Legacy private-key custody and non-atomic live transfers are disabled for safety")
     fee_wei = int(amount_wei * 0.02)
     seller_wei = amount_wei - fee_wei
     buyer_account = Account.from_key(buyer_private_key)
@@ -149,6 +150,7 @@ def execute_automated_trade(buyer_private_key: str, seller_address: str, amount_
     return {"status": "success", "chain": "ETH"}
 
 def execute_automated_btc_trade(buyer_private_key: str, seller_address: str, total_amount_btc: float):
+    raise RuntimeError("Legacy private-key custody and non-atomic live transfers are disabled for safety")
     amount_sats = int(round(total_amount_btc * 100_000_000))
     fee_sats = int(amount_sats * 0.02)
     seller_sats = amount_sats - fee_sats
@@ -158,6 +160,7 @@ def execute_automated_btc_trade(buyer_private_key: str, seller_address: str, tot
     return {"status": "success", "chain": "BTC", "tx_hash": tx_hash}
 
 async def execute_automated_sol_trade(buyer_private_key: str, seller_address: str, total_amount_sol: float):
+    raise RuntimeError("Legacy private-key custody and non-atomic live transfers are disabled for safety")
     amount_lamports = int(round(total_amount_sol * 1_000_000_000))
     fee_l, sel_l = int(amount_lamports * 0.02), amount_lamports - int(amount_lamports * 0.02)
     clean_key = buyer_private_key.strip().replace("0x", "")
@@ -173,6 +176,7 @@ async def execute_automated_sol_trade(buyer_private_key: str, seller_address: st
         return {"status": "success", "chain": "SOL", "tx_hash": str(res.value)}
 
 def execute_automated_trx_trade(buyer_private_key: str, seller_address: str, total_amount_trx: float):
+    raise RuntimeError("Legacy private-key custody and non-atomic live transfers are disabled for safety")
     amount_sun = int(round(total_amount_trx * 1_000_000))
     fee_sun, seller_sun = int(amount_sun * 0.02), amount_sun - int(amount_sun * 0.02)
     clean_key = buyer_private_key.strip().replace("0x", "")
