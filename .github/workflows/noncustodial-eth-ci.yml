@@ -94,6 +94,11 @@ jobs:
               assert q["transactions"][1]["to"]==m.FEE_WALLETS["ETH"]
               assert q["transactions"][0]["data"]==q["transactions"][1]["data"]
               assert c.get("/client/eth-pay.js").status_code==200
+              import ast
+              helper = c.get("/client/eth-agent.py")
+              assert helper.status_code == 200
+              ast.parse(helper.text)
+              assert 'send_raw_transaction' in helper.text and 'AIMARKET_BUYER_PRIVATE_KEY' in helper.text
               changed=invoice.model_dump()
               changed["amount_wei"]+=1
               assert c.post("/api/payments/eth/quote",json=changed).status_code==422
