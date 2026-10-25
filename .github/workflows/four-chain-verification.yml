@@ -33,8 +33,8 @@ jobs:
               assert ws.receive_json()["status"]=="registered"
           buyer=Account.create(); seller=Account.create()
           for currency in ("SOL","TRX"):
-              payer_address=(str(Pubkey.new_unique()) if currency=="SOL" else PrivateKey.random().public_key.to_base58check_address())
-              payout=(str(Pubkey.new_unique()) if currency=="SOL" else PrivateKey.random().public_key.to_base58check_address())
+              payer_address=(str(Pubkey.new_unique()) if currency=="SOL" else PrivateKey(bytes.fromhex('1111111111111111111111111111111111111111111111111111111111111111')).public_key.to_base58check_address())
+              payout=(str(Pubkey.new_unique()) if currency=="SOL" else PrivateKey(bytes.fromhex('2222222222222222222222222222222222222222222222222222222222222222')).public_key.to_base58check_address())
               with TestClient(m.app) as client:
                   with client.websocket_connect("/ws/registry") as sell:
                       auth(sell,seller,["task"],{"task":0.05})
@@ -101,8 +101,8 @@ jobs:
           from tronpy.keys import PrivateKey
           payer=Account.create();seller=Account.create()
           psol=str(Pubkey.new_unique());ssol=str(Pubkey.new_unique())
-          tpk=PrivateKey.random()
-          tpk2=PrivateKey.random()
+          tpk=PrivateKey(bytes.fromhex('3333333333333333333333333333333333333333333333333333333333333333'))
+          tpk2=PrivateKey(bytes.fromhex('4444444444444444444444444444444444444444444444444444444444444444'))
           ptrx=tpk.public_key.to_base58check_address()
           strx=tpk2.public_key.to_base58check_address()
           def invoice(currency, payer_address, seller_address, units):
