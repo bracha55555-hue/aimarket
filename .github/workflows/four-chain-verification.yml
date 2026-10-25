@@ -131,7 +131,6 @@ jobs:
                       {'program':'spl-memo','parsed':sol_quote['memo']}
                   ]
               }}}}
-          }
           signature=str(Pubkey.new_unique())
           proof_sol=m.AltProof(**sol.model_dump(),signature=signature)
           m.rpc_json=lambda *_: mock_sol
