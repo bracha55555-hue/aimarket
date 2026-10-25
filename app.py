@@ -20,6 +20,7 @@ from solders.message import Message as SolMessage
 from solders.transaction import Transaction as SolTransaction
 from tronpy import Tron
 from tronpy.keys import PrivateKey as TronPrivateKey
+from tronpy.keys import to_hex_address as tron_to_hex_address
 
 RPC_URL = os.getenv("ETH_RPC_URL", "https://ethereum-rpc.publicnode.com")
 SOL_RPC_URL = os.getenv("SOL_RPC_URL", "https://api.mainnet-beta.solana.com")
@@ -143,7 +144,7 @@ async def ai_plugin_manifest():
         "schema_version": "v1",
         "name_for_model": "AI_Market_Registry",
         "name_for_human": "AI Market agent directory",
-        "description_for_model": "AI-agent registry and coordination service. Non-custodial Ethereum wallet payments are available with seller-signed invoices; payment success requires verified receipts for both the seller and 2% fee after 12 confirmations. No escrow or durable central ledger. BTC, SOL and TRX payout automation is not enabled.",
+        "description_for_model": "AI-agent registry and coordination service. Non-custodial native payments for BTC, ETH, SOL, TRX using seller-signed invoices. Buyers sign and broadcast transactions only from their own wallets; chain verification checks seller and 2% fee receipts before declaring settlement. BTC/SOL use atomic transactions; ETH/TRX can have partial transfers. No custody, escrow, or durable centralized order ledger.",
         "api": {"type": "websocket", "url": f"{PUBLIC_SERVER_URL.replace('https', 'wss')}/ws/registry"},
         "auth": {"type": "none"}, "x_agent_identity_auth": "EIP-191 signature challenge required for WebSocket registration",
         "x_protocol_note": "Custom WebSocket; not an implementation of the A2A standard"
@@ -151,7 +152,7 @@ async def ai_plugin_manifest():
 
 @app.get("/health")
 async def health_check():
-    async with state_lock: return {"status": "online", "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS, "noncustodial_eth_wallet_payments": True, "noncustodial_btc_atomic_payment": True}
+    async with state_lock: return {"status": "online", "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS, "noncustodial_eth_wallet_payments": True, "noncustodial_btc_atomic_payment": True, "native_sol_trx_quote": True}
 
 def execute_automated_trade(buyer_private_key: str, seller_address: str, amount_wei: int):
     raise RuntimeError("Legacy private-key custody and non-atomic live transfers are disabled for safety")
@@ -213,11 +214,11 @@ async def process_trade_fees(tx: TradeTransaction):
 
 @app.get("/")
 async def service_index():
-    return {"service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "signed_wallet_payments", "eth_quote": "/api/payments/eth/quote", "eth_verify": "/api/payments/eth/verify", "eth_client": "/client/eth-pay.js", "btc_quote": "/api/payments/btc/quote", "btc_verify": "/api/payments/btc/verify", "btc_agent": "/client/btc-agent.py", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
+    return {"service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "signed_wallet_payments", "eth_quote": "/api/payments/eth/quote", "eth_verify": "/api/payments/eth/verify", "eth_client": "/client/eth-pay.js", "btc_quote": "/api/payments/btc/quote", "btc_verify": "/api/payments/btc/verify", "btc_agent": "/client/btc-agent.py", "native_quote": "/api/payments/native/quote", "native_verify": "/api/payments/native/verify", "native_client": "/client/native-agent.py", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "warning": "Never send a private key. ETH wallet payments require signed invoices and two confirmed transfers; other chains are not enabled."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. ETH wallet payments require signed invoices and two confirmed transfers; other chains are not enabled."}
 
 def encode_n4_directory(safe):
     # Lossless, optional compact representation for non-financial service metadata.
@@ -290,7 +291,7 @@ async def auth_guide():
             "Receive auth_challenge with exact message. Sign message using EIP-191 personal_sign locally. Never send a private key.",
             "Send JSON: {action: authenticate, signature: 0x-prefixed ECDSA signature} within 60 seconds.",
             "Receive status registered with identity_verified true. Discovery, requests, delivery and receipt confirmation then become available.",
-            "Ethereum buyer payments can be signed and sent from the buyer wallet. Seller signs an exact invoice, buyer broadcasts two native ETH transfers, and the market confirms both only after 12 Ethereum confirmations. BTC/SOL/TRX verified settlement is not implemented. No escrow or persistent order storage; orders expire in one hour."
+            "All four native coins have client-side signed payment instructions and on-chain verification. Solana and BTC use atomic multi-output single transactions; ETH and TRX use two transfers, which can be partial. The original buyer retains payment hashes and seller-signed invoices. No custodial escrow and no durable central order database; order coordination expires in one hour."
         ],
         "identity": "Ethereum address for authentication only; services may be priced in BTC, ETH, SOL, or TRX.",
         "registration": {"agent_id": "0x<your_eth_address>", "capabilities": ["your_service"], "pricing": {"your_service": 0.01}},
@@ -359,7 +360,7 @@ async def mcp_endpoint(request: Request):
                 return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "No arguments expected"}}, status_code=400)
             data = await health_check()
             data["fee_rate"] = 0.02
-            data["payment_status"] = "ETH wallet payments with signed invoice; verify both transfers on chain"
+            data["payment_status"] = "BTC ETH SOL TRX native wallet transfers with seller-signed invoices and chain-confirmed proofs"
         else:
             if arguments:
                 return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "No arguments expected"}}, status_code=400)
@@ -695,6 +696,275 @@ if __name__ == "__main__":
     return Response(source, media_type="text/x-python",
         headers={"Cache-Control": "public, max-age=86400"})
 
+
+class AltInvoice(BaseModel):
+    currency: Literal["SOL", "TRX"]
+    order_id: str
+    buyer: str
+    seller: str
+    payer_address: str
+    seller_payout_address: str
+    amount_units: int
+    seller_signature: str
+
+class AltProof(AltInvoice):
+    signature: Optional[str] = None
+    seller_tx: Optional[str] = None
+    fee_tx: Optional[str] = None
+
+def alt_invoice_message(i):
+    fee = i.amount_units // 50
+    return chr(10).join([
+        "AI Market native-chain invoice v1",
+        "Origin: " + PUBLIC_SERVER_URL.rstrip("/"),
+        "Network: " + ("Solana mainnet-beta" if i.currency == "SOL" else "TRON mainnet"),
+        "Order: " + i.order_id,
+        "Buyer identity: " + i.buyer.lower(),
+        "Seller identity: " + i.seller.lower(),
+        "Payer: " + i.payer_address,
+        "Seller payout: " + i.seller_payout_address,
+        "Amount units: " + str(i.amount_units),
+        "Fee units: " + str(fee),
+        "Seller units: " + str(i.amount_units-fee)
+    ])
+
+def valid_native_payer(currency, address):
+    try:
+        if not isinstance(address,str) or not 26 <= len(address) <= 90:
+            return False
+        return (str(SolPubkey.from_string(address))==address
+                if currency=="SOL" else Tron.is_base58check_address(address))
+    except Exception:
+        return False
+
+def alt_invoice_quote(i):
+    if (isinstance(i.amount_units, bool) or not 1000 <= i.amount_units <= 10**14
+            or not isinstance(i.order_id, str) or not 16 <= len(i.order_id) <= 80
+            or any(ch not in "0123456789abcdef-" for ch in i.order_id.lower())
+            or not Web3.is_address(i.buyer) or not Web3.is_address(i.seller)
+            or i.buyer.lower() == i.seller.lower()):
+        raise ValueError("invalid order, amount or identities")
+    if i.currency == "SOL":
+        try:
+            if (str(SolPubkey.from_string(i.payer_address)) != i.payer_address or
+                    str(SolPubkey.from_string(i.seller_payout_address)) != i.seller_payout_address or
+                    i.payer_address == i.seller_payout_address or
+                    i.seller_payout_address == FEE_WALLETS["SOL"] or
+                    i.payer_address == FEE_WALLETS["SOL"]):
+                raise ValueError("invalid Solana destinations")
+        except Exception as exc:
+            raise ValueError("invalid Solana address") from exc
+    else:
+        if (not Tron.is_base58check_address(i.payer_address) or
+                not Tron.is_base58check_address(i.seller_payout_address) or
+                i.payer_address == i.seller_payout_address or
+                i.seller_payout_address == FEE_WALLETS["TRX"] or
+                i.payer_address == FEE_WALLETS["TRX"]):
+            raise ValueError("invalid TRON destinations")
+    text = alt_invoice_message(i)
+    try:
+        signer = Account.recover_message(encode_defunct(text=text), signature=i.seller_signature)
+    except Exception:
+        signer = None
+    if not signer or signer.lower() != i.seller.lower():
+        raise ValueError("seller signature invalid")
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    fee = i.amount_units // 50
+    memo = "AI-Market:" + digest
+    return {"status":"wallet_signature_required", "currency":i.currency,
+            "order_id":i.order_id, "memo":memo, "fee_units":fee,
+            "seller_units":i.amount_units-fee, "payer":i.payer_address,
+            "atomic":i.currency == "SOL",
+            "unit":"lamports" if i.currency == "SOL" else "sun",
+            "outputs":[
+                {"purpose":"seller", "to":i.seller_payout_address, "amount_units":i.amount_units-fee},
+                {"purpose":"platform_fee","to":FEE_WALLETS[i.currency], "amount_units":fee}
+            ],
+            "warning": ("Solana uses ONE atomic transaction with two native transfers and a signed memo."
+                       if i.currency == "SOL" else
+                       "TRON uses TWO separate native TRX transfers. A partial transfer is NOT settled. Verify each transaction in solidified state. Never retry without checking both hashes.")}
+
+@app.post("/api/payments/native/sign-message")
+async def alt_sign_message(i: AltInvoice):
+    try:
+        # Validate canonical fields separately; signature is signed at the client's wallet, never on server.
+        i2 = i.model_copy(update={"seller_signature":"pending"})
+        if i2.currency not in ("SOL","TRX") or not Web3.is_address(i2.seller):
+            raise ValueError("invalid identity")
+        if isinstance(i2.amount_units,bool) or not 1000 <= i2.amount_units <= 10**14:
+            raise ValueError("invalid amount")
+        return {"message":alt_invoice_message(i)}
+    except ValueError as exc:
+        return JSONResponse({"error":str(exc)},status_code=422)
+
+@app.post("/api/payments/native/quote")
+async def alt_quote_endpoint(i: AltInvoice):
+    try: return alt_invoice_quote(i)
+    except ValueError as exc:
+        return JSONResponse({"status":"rejected","reason":str(exc)},status_code=422)
+
+def rpc_json(url, payload):
+    request = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"),
+                                     headers={"Content-Type":"application/json"}, method="POST")
+    with urllib.request.urlopen(request, timeout=12) as response:
+        body = response.read(350001)
+        if len(body) > 350000: raise ValueError("oversized RPC response")
+        return json.loads(body)
+
+def verify_solana_payment(proof):
+    q=alt_invoice_quote(proof)
+    if proof.currency!="SOL" or not proof.signature or len(proof.signature)>120:
+        return {"status":"invalid_signature","payment_verified":False}
+    try:
+        payload={"jsonrpc":"2.0","id":1,"method":"getTransaction",
+                 "params":[proof.signature,{"encoding":"jsonParsed","commitment":"finalized",
+                                             "maxSupportedTransactionVersion":0}]}
+        tx=rpc_json(SOL_RPC_URL,payload).get("result")
+    except Exception:
+        return {"status":"rpc_unavailable","payment_verified":False}
+    if not isinstance(tx,dict) or not isinstance(tx.get("transaction"),dict):
+        return {"status":"not_finalized","payment_verified":False}
+    meta=tx.get("meta")
+    message=tx["transaction"].get("message",{})
+    if not isinstance(meta,dict) or meta.get("err") is not None or not isinstance(message,dict):
+        return {"status":"failed_or_unverified","payment_verified":False}
+    keys=message.get("accountKeys",[])
+    if not any(isinstance(k,dict) and k.get("pubkey")==proof.payer_address and k.get("signer") is True for k in keys):
+        return {"status":"payer_not_signer","payment_verified":False}
+    instructions=message.get("instructions",[])
+    observed=[]; memos=[]
+    for ins in instructions:
+        if not isinstance(ins,dict): continue
+        if ins.get("program")=="system" and isinstance(ins.get("parsed"),dict):
+            parsed=ins["parsed"]
+            if parsed.get("type")=="transfer" and isinstance(parsed.get("info"),dict):
+                data=parsed["info"]
+                observed.append((data.get("source"),data.get("destination"),data.get("lamports")))
+        if ins.get("program")=="spl-memo":
+            parsed=ins.get("parsed")
+            if isinstance(parsed,str): memos.append(parsed)
+    required={(proof.payer_address,proof.seller_payout_address,q["seller_units"]),
+              (proof.payer_address,FEE_WALLETS["SOL"],q["fee_units"])}
+    verified=(len(observed)==2 and set(observed)==required
+              and memos==[q["memo"]])
+    return {"status":"verified" if verified else "payment_mismatch",
+            "payment_verified":verified,"order_id":proof.order_id,
+            "signature":proof.signature, "atomic":True,
+            "fee_paid_units":q["fee_units"] if verified else 0}
+
+def verify_tron_transfer(txid,payer,recipient,amount,memo):
+    if not isinstance(txid,str) or len(txid)!=64:
+        return {"status":"invalid_hash"}
+    try: int(txid,16)
+    except ValueError: return {"status":"invalid_hash"}
+    try:
+        tx=rpc_json("https://api.trongrid.io/walletsolidity/gettransactionbyid",{"value":txid})
+    except Exception:
+        return {"status":"rpc_unavailable"}
+    if not isinstance(tx,dict) or str(tx.get("txID","")).lower()!=txid.lower():
+        return {"status":"not_solidified"}
+    contract=tx.get("raw_data",{}).get("contract",[])
+    if len(contract)!=1 or contract[0].get("type")!="TransferContract":
+        return {"status":"wrong_contract"}
+    data=contract[0].get("parameter",{}).get("value",{})
+    try:
+        valid=(str(data.get("owner_address","")).lower()==tron_to_hex_address(payer).lower()
+               and str(data.get("to_address","")).lower()==tron_to_hex_address(recipient).lower()
+               and int(data.get("amount",-1))==amount
+               and str(tx.get("raw_data",{}).get("data","")).lower()==memo.encode().hex()
+               and all(ret.get("contractRet")=="SUCCESS" for ret in tx.get("ret",[]))
+               and bool(tx.get("ret")))
+    except Exception:
+        valid=False
+    return {"status":"confirmed" if valid else "transfer_mismatch","txid":txid}
+
+def verify_tron_payment(proof):
+    q=alt_invoice_quote(proof)
+    if proof.currency!="TRX" or not proof.seller_tx or not proof.fee_tx or proof.seller_tx.lower()==proof.fee_tx.lower():
+        return {"status":"invalid_hashes","payment_verified":False}
+    seller=verify_tron_transfer(proof.seller_tx,proof.payer_address,proof.seller_payout_address,q["seller_units"],q["memo"])
+    fee=verify_tron_transfer(proof.fee_tx,proof.payer_address,FEE_WALLETS["TRX"],q["fee_units"],q["memo"])
+    verified=seller["status"]==fee["status"]=="confirmed"
+    return {"status":"verified" if verified else "awaiting_solidified_transfers",
+            "payment_verified":verified,"order_id":proof.order_id,
+            "atomic":False,"seller_transfer":seller,"fee_transfer":fee,
+            "fee_paid_units":q["fee_units"] if verified else 0}
+
+@app.post("/api/payments/native/verify")
+async def alt_verify_endpoint(proof: AltProof):
+    try:
+        if proof.currency=="SOL":
+            return await asyncio.to_thread(verify_solana_payment,proof)
+        return await asyncio.to_thread(verify_tron_payment,proof)
+    except ValueError as exc:
+        return JSONResponse({"status":"rejected","payment_verified":False,"reason":str(exc)},status_code=422)
+    except Exception:
+        return JSONResponse({"status":"verification_unavailable","payment_verified":False},status_code=503)
+
+@app.get("/client/native-agent.py")
+async def alt_client_helper():
+    client=r'''# Run locally ONLY; never send your private key to AI Market.
+import os,sys,json,asyncio,urllib.request
+from solders.keypair import Keypair
+from solders.pubkey import Pubkey
+from solders.instruction import Instruction
+from solders.system_program import transfer, TransferParams
+from solders.message import Message
+from solders.transaction import Transaction
+from solana.rpc.async_api import AsyncClient
+from tronpy import Tron
+from tronpy.keys import PrivateKey
+
+def post(url, payload):
+    data=json.dumps(payload).encode()
+    request=urllib.request.Request(url,data=data,headers={"Content-Type":"application/json"},method="POST")
+    with urllib.request.urlopen(request,timeout=20) as r: return json.load(r)
+
+async def pay_sol(invoice, quote):
+    key=Keypair.from_base58_string(os.environ["AIMARKET_SOL_BUYER_KEY"])
+    if str(key.pubkey())!=invoice["payer_address"]: raise ValueError("wrong payer")
+    instructions=[transfer(TransferParams(from_pubkey=key.pubkey(),to_pubkey=Pubkey.from_string(row["to"]),lamports=row["amount_units"]))
+                  for row in quote["outputs"]]
+    instructions.append(Instruction(Pubkey.from_string("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"),
+                                    quote["memo"].encode("utf-8"), []))
+    async with AsyncClient(os.getenv("SOL_RPC_URL","https://api.mainnet-beta.solana.com")) as client:
+        blockhash=(await client.get_latest_blockhash()).value.blockhash
+        msg=Message.new_with_blockhash(instructions,key.pubkey(),blockhash)
+        tx=Transaction([key],msg,blockhash)
+        response=await client.send_raw_transaction(bytes(tx))
+        return {"status":"broadcast_pending_finalization","proof":{**invoice,"signature":str(response.value)},
+                "verify":"/api/payments/native/verify"}
+
+def pay_trx(invoice, quote):
+    raw=os.environ["AIMARKET_TRX_BUYER_KEY"].removeprefix("0x")
+    key=PrivateKey(bytes.fromhex(raw))
+    sender=key.public_key.to_base58check_address()
+    if sender!=invoice["payer_address"]: raise ValueError("wrong payer")
+    client=Tron(network="mainnet")
+    ids={}
+    for row in quote["outputs"]:
+        try:
+            signed=client.trx.transfer(sender,row["to"],row["amount_units"]).memo(quote["memo"]).build().sign(key)
+            sent=signed.broadcast()
+            ids[row["purpose"]]=str(sent.txid)
+        except Exception as exc:
+            return {"status":"partial_or_failed_broadcast","txids":ids,
+                    "error":type(exc).__name__,"warning":"Check these transaction IDs on chain before any retry."}
+    return {"status":"broadcast_pending_solidification","proof":{**invoice,
+                "seller_tx":ids["seller"],"fee_tx":ids["platform_fee"]},
+            "verify":"/api/payments/native/verify"}
+
+if __name__=="__main__":
+    if len(sys.argv)!=3: raise SystemExit("Usage: python native-agent.py invoice.json https://market")
+    with open(sys.argv[1],encoding="utf-8") as file: invoice=json.load(file)
+    url=sys.argv[2].rstrip("/")
+    quote=post(url+"/api/payments/native/quote",invoice)
+    if quote.get("status")!="wallet_signature_required": raise RuntimeError("invoice not authorized")
+    result=asyncio.run(pay_sol(invoice,quote)) if invoice["currency"]=="SOL" else pay_trx(invoice,quote)
+    print(json.dumps(result))
+'''
+    return Response(client,media_type="text/x-python",headers={"Cache-Control":"public, max-age=86400"})
+
 @app.websocket("/ws/registry")
 async def agent_registry_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -836,6 +1106,9 @@ async def agent_registry_endpoint(websocket: WebSocket):
                 await websocket.send_json({"event": "payment_required", "trade_id": tid, "result": result})
                 if seller_ws:
                     await seller_ws.send_json({"event": "delivery_confirmed", "trade_id": tid, "payment_status": result["status"]})
+                    if tx.currency in ("SOL", "TRX"):
+                        await websocket.send_json({"event": "native_payer_required", "trade_id": tid,
+                                 "currency": tx.currency, "note": "Declare your chain wallet address. Never send private keys."})
                     if tx.currency == "BTC":
                         amount_sats = int(Decimal(str(tx.total_amount)) * Decimal(100000000))
                         await seller_ws.send_json({"event": "btc_invoice_needed", "trade_id": tid, "buyer": trade["buyer"],
@@ -847,6 +1120,103 @@ async def agent_registry_endpoint(websocket: WebSocket):
                         request_invoice = EthInvoice(order_id=tid, buyer=trade["buyer"], seller=trade["seller"], amount_wei=amount_wei, seller_signature="pending")
                         await seller_ws.send_json({"event": "sign_eth_invoice", "trade_id": tid, "message": eth_invoice_text(request_invoice),
                                                    "amount_wei": amount_wei, "note": "Sign this exact message locally using EIP-191; do not share your private key."})
+            elif action == "declare_native_payer":
+                tid = msg.get("trade_id")
+                chain_payer = msg.get("payer_address")
+                seller_ws = None
+                request = None
+                async with state_lock:
+                    trade = active_trades.get(tid)
+                    if trade and trade["buyer"] == agent_id and trade["status"] == "awaiting_payment" and trade["data"]["currency"] in ("SOL","TRX"):
+                        currency = trade["data"]["currency"]
+                        valid = valid_native_payer(currency, chain_payer)
+                        if valid:
+                            trade["payer_address"] = chain_payer
+                            seller_ws=active_agents.get(trade["seller"])
+                            units=int(Decimal(str(trade["data"]["total_amount"]))*
+                                      (Decimal(1000000000) if currency=="SOL" else Decimal(1000000)))
+                            request={"event":"native_invoice_needed","trade_id":tid,"currency":currency,
+                                "buyer":trade["buyer"],"seller":trade["seller"],
+                                "payer_address":chain_payer,"amount_units":units,
+                                "quote_endpoint":"/api/payments/native/quote",
+                                "message_endpoint":"/api/payments/native/sign-message"}
+                if not request:
+                    await websocket.send_json({"error":"invalid_native_payer_or_trade"})
+                    continue
+                if seller_ws: await seller_ws.send_json(request)
+                await websocket.send_json({"event":"native_payer_registered","trade_id":tid})
+            elif action == "authorize_native_invoice":
+                tid=msg.get("trade_id")
+                address=msg.get("seller_payout_address")
+                signature=msg.get("signature")
+                invoice=None
+                buyer_ws=None
+                async with state_lock:
+                    trade=active_trades.get(tid)
+                    if trade and trade["seller"]==agent_id and trade["status"]=="awaiting_payment" and trade["data"]["currency"] in ("SOL","TRX") and trade.get("payer_address"):
+                        currency=trade["data"]["currency"]
+                        units=int(Decimal(str(trade["data"]["total_amount"]))*
+                            (Decimal(1000000000) if currency=="SOL" else Decimal(1000000)))
+                        try:
+                            invoice=AltInvoice(currency=currency,order_id=tid,buyer=trade["buyer"],
+                                seller=agent_id,payer_address=trade["payer_address"],
+                                seller_payout_address=address,amount_units=units,
+                                seller_signature=signature)
+                        except Exception:
+                            invoice=None
+                        buyer_ws=active_agents.get(trade["buyer"])
+                if invoice is None:
+                    await websocket.send_json({"error":"invalid_native_invoice_state"})
+                    continue
+                try: quote=alt_invoice_quote(invoice)
+                except Exception:
+                    await websocket.send_json({"error":"invalid_native_invoice_signature_or_address"})
+                    continue
+                async with state_lock:
+                    trade=active_trades.get(tid)
+                    if not trade or trade["seller"]!=agent_id or trade["status"]!="awaiting_payment":
+                        await websocket.send_json({"error":"native_invoice_expired"})
+                        continue
+                    trade["native_invoice"]=invoice.model_dump() if hasattr(invoice,"model_dump") else invoice.dict()
+                    saved_invoice=dict(trade["native_invoice"])
+                if buyer_ws:
+                    await buyer_ws.send_json({"event":"native_payment_authorized","trade_id":tid,
+                                              "invoice":saved_invoice,"quote":quote})
+                await websocket.send_json({"event":"native_invoice_authorized","trade_id":tid})
+            elif action == "submit_native_payment_proof":
+                tid=msg.get("trade_id")
+                try: proof=AltProof(**msg.get("proof",{}))
+                except Exception:
+                    await websocket.send_json({"error":"invalid_native_payment_proof"})
+                    continue
+                async with state_lock:
+                    trade=active_trades.get(tid)
+                    saved=dict(trade["native_invoice"]) if trade and trade["buyer"]==agent_id and trade["status"]=="awaiting_payment" and trade.get("native_invoice") else None
+                if saved is None or proof.order_id!=tid or any(getattr(proof,k)!=v for k,v in saved.items()):
+                    await websocket.send_json({"error":"unrecognized_native_payment_proof"})
+                    continue
+                try:
+                    verifier=verify_solana_payment if proof.currency=="SOL" else verify_tron_payment
+                    verdict=await asyncio.to_thread(verifier,proof)
+                except Exception:
+                    verdict={"status":"verification_unavailable","payment_verified":False}
+                if not verdict.get("payment_verified"):
+                    await websocket.send_json({"event":"payment_pending","trade_id":tid,"result":verdict})
+                    continue
+                seller_ws=None
+                complete=False
+                async with state_lock:
+                    trade=active_trades.get(tid)
+                    if trade and trade["buyer"]==agent_id and trade["status"]=="awaiting_payment" and trade.get("native_invoice")==saved:
+                        trade["status"]="completed"
+                        seller_ws=active_agents.get(trade["seller"])
+                        complete=True
+                if not complete:
+                    await websocket.send_json({"error":"payment_trade_expired"})
+                    continue
+                await websocket.send_json({"event":"trade_settled","trade_id":tid,"result":verdict})
+                if seller_ws:
+                    await seller_ws.send_json({"event":"payment_received","trade_id":tid,"result":verdict})
             elif action == "authorize_btc_invoice":
                 tid, destination, signature = msg.get("trade_id"), msg.get("seller_btc_address"), msg.get("signature")
                 invoice, buyer_ws = None, None
