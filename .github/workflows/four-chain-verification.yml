@@ -15,6 +15,80 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt httpx
       - run: python -m py_compile app.py
+      - name: Test authenticated WebSocket checkout through all native actions
+        run: |
+          python - <<'PY'
+          import app as m
+          from fastapi.testclient import TestClient
+          from eth_account import Account
+          from eth_account.messages import encode_defunct
+          from solders.pubkey import Pubkey
+          from tronpy.keys import PrivateKey
+          def auth(ws,account,caps,prices):
+              ws.send_json({"agent_id":account.address.lower(),"capabilities":caps,"pricing":prices})
+              challenge=ws.receive_json()
+              assert challenge["event"]=="auth_challenge"
+              sig=Account.sign_message(encode_defunct(text=challenge["message"]),account.key).signature.hex()
+              ws.send_json({"action":"authenticate","signature":sig})
+              assert ws.receive_json()["status"]=="registered"
+          buyer=Account.create(); seller=Account.create()
+          for currency in ("SOL","TRX"):
+              payer_address=(str(Pubkey.new_unique()) if currency=="SOL" else PrivateKey.random().public_key.to_base58check_address())
+              payout=(str(Pubkey.new_unique()) if currency=="SOL" else PrivateKey.random().public_key.to_base58check_address())
+              with TestClient(m.app) as client:
+                  with client.websocket_connect("/ws/registry") as sell:
+                      auth(sell,seller,["task"],{"task":0.05})
+                      with client.websocket_connect("/ws/registry") as buy:
+                          auth(buy,buyer,["consumer"],{})
+                          buy.send_json({"action":"init_trade","trade_data":{"buyer_agent":buyer.address.lower(),
+                              "seller_agent":seller.address.lower(),"item_name":"task",
+                              "currency":currency,"total_amount":0.05}})
+                          requested=sell.receive_json()
+                          assert requested["event"]=="trade_requested"
+                          tid=requested["trade_id"]
+                          assert buy.receive_json()["event"]=="trade_created"
+                          sell.send_json({"action":"deliver","trade_id":tid,"payload":{"text":"completed"}})
+                          assert buy.receive_json()["event"]=="goods_delivered"
+                          buy.send_json({"action":"confirm_receipt","trade_id":tid})
+                          assert buy.receive_json()["event"]=="payment_required"
+                          assert buy.receive_json()["event"]=="native_payer_required"
+                          assert sell.receive_json()["event"]=="delivery_confirmed"
+                          buy.send_json({"action":"declare_native_payer","trade_id":tid,"payer_address":payer_address})
+                          needs=sell.receive_json()
+                          assert needs["event"]=="native_invoice_needed"
+                          assert needs["payer_address"]==payer_address
+                          assert buy.receive_json()["event"]=="native_payer_registered"
+                          initial=m.AltInvoice(currency=currency,order_id=tid,buyer=buyer.address.lower(),
+                              seller=seller.address.lower(),payer_address=payer_address,
+                              seller_payout_address=payout,amount_units=needs["amount_units"],
+                              seller_signature="pending")
+                          sig=Account.sign_message(encode_defunct(text=m.alt_invoice_message(initial)),seller.key).signature.hex()
+                          sell.send_json({"action":"authorize_native_invoice","trade_id":tid,
+                              "seller_payout_address":payout,"signature":sig})
+                          authorized=buy.receive_json()
+                          assert authorized["event"]=="native_payment_authorized"
+                          assert authorized["quote"]["atomic"]==(currency=="SOL")
+                          assert sell.receive_json()["event"]=="native_invoice_authorized"
+                          payload={**authorized["invoice"]}
+                          if currency=="SOL":payload["signature"]="C"*87
+                          else:payload.update(seller_tx="a"*64,fee_tx="b"*64)
+                          original=m.verify_solana_payment if currency=="SOL" else m.verify_tron_payment
+                          if currency=="SOL":m.verify_solana_payment=lambda proof:{"payment_verified":False,"status":"unconfirmed"}
+                          else:m.verify_tron_payment=lambda proof:{"payment_verified":False,"status":"unconfirmed"}
+                          try:
+                              buy.send_json({"action":"submit_native_payment_proof","trade_id":tid,"proof":payload})
+                              pending=buy.receive_json()
+                              assert pending["event"]=="payment_pending",pending
+                              if currency=="SOL":m.verify_solana_payment=lambda proof:{"payment_verified":True,"status":"verified"}
+                              else:m.verify_tron_payment=lambda proof:{"payment_verified":True,"status":"verified"}
+                              buy.send_json({"action":"submit_native_payment_proof","trade_id":tid,"proof":payload})
+                              assert buy.receive_json()["event"]=="trade_settled"
+                              assert sell.receive_json()["event"]=="payment_received"
+                          finally:
+                              if currency=="SOL":m.verify_solana_payment=original
+                              else:m.verify_tron_payment=original
+          print("PASS native checkout end-to-end with mock finality and zero transfers")
+          PY
       - name: SOL and TRX order safety and payment confirmation (mocked chains, zero transfers)
         run: |
           python - <<'PY'
