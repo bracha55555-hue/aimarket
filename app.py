@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from typing import Dict, Literal, Optional
 from web3 import Web3
 from eth_account import Account
+from eth_account.messages import encode_defunct
 from bit import Key as BTCKey
 from solana.rpc.async_api import AsyncClient as SolanaAsyncClient
 from solders.keypair import Keypair as SolKeypair
@@ -190,13 +191,32 @@ async def service_index():
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v1", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "warning": "Do not send private keys. No payment has been verified by this service."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "warning": "Do not send private keys. Payment settlement is not implemented."}
 
 @app.get("/api/agents")
 async def public_agents():
     async with state_lock:
-        safe = {agent_id: {"capabilities": profile["capabilities"], "pricing": profile["pricing"]} for agent_id, profile in agent_profiles.items()}
-    return {"agents": safe, "count": len(safe), "note": "Registration is not cryptographically authenticated"}
+        safe = {agent_id: {"capabilities": profile["capabilities"], "pricing": profile["pricing"], "identity_verified": True} for agent_id, profile in agent_profiles.items() if profile.get("identity_verified")}
+    return {"agents": safe, "count": len(safe), "note": "Verified Ethereum identity proves key ownership, not service quality. Payments and trades are not persisted."}
+
+@app.get("/api/auth-guide")
+async def auth_guide():
+    return {
+        "version": "ai-market-ws-v2",
+        "steps": [
+            "Connect with a WSS WebSocket to /ws/registry.",
+            "Send JSON: {agent_id: 0x-prefixed Ethereum address, capabilities: [name], pricing: {name: positive_price}}.",
+            "Receive auth_challenge with exact message. Sign message using EIP-191 personal_sign locally. Never send a private key.",
+            "Send JSON: {action: authenticate, signature: 0x-prefixed ECDSA signature} within 60 seconds.",
+            "Receive status registered with identity_verified true. Discovery, requests, delivery and receipt confirmation then become available.",
+            "No escrow, payment verification, persistent order storage, or actual disbursements are provided. Do not accept unpaid orders as settled."
+        ],
+        "identity": "Ethereum address for authentication only; services may be priced in BTC, ETH, SOL, or TRX.",
+        "registration": {"agent_id": "0x<your_eth_address>", "capabilities": ["your_service"], "pricing": {"your_service": 0.01}},
+        "service_warning": "This is a custom WebSocket API, not the A2A protocol.",
+        "fee_rate": 0.02,
+        "verified_settlement": False
+    }
 
 @app.websocket("/ws/registry")
 async def agent_registry_endpoint(websocket: WebSocket):
@@ -223,7 +243,31 @@ async def agent_registry_endpoint(websocket: WebSocket):
         if not isinstance(pricing, dict) or len(pricing) > 32 or any(k not in capabilities or not isinstance(v, (int, float)) or isinstance(v, bool) or not math.isfinite(v) or v <= 0 for k, v in pricing.items()):
             await websocket.close(code=1008)
             return
-        safe_profile = {"agent_id": agent_id, "capabilities": capabilities, "pricing": pricing}
+        if not Web3.is_address(agent_id):
+            await websocket.send_json({"error": "agent_id_must_be_ethereum_address", "authentication_guide": "/api/auth-guide"})
+            await websocket.close(code=1008)
+            return
+        nonce = uuid.uuid4().hex + uuid.uuid4().hex
+        challenge = chr(10).join(["AI Market agent authentication", f"Origin: {PUBLIC_SERVER_URL.rstrip('/')}", f"Identity: {agent_id.lower()}", f"Nonce: {nonce}"])
+        await websocket.send_json({"event": "auth_challenge", "message": challenge, "expires_seconds": 60})
+        auth_raw = await asyncio.wait_for(websocket.receive_text(), timeout=60)
+        if len(auth_raw.encode("utf-8")) > 1024:
+            await websocket.close(code=1009)
+            return
+        auth = json.loads(auth_raw)
+        if not isinstance(auth, dict) or auth.get("action") != "authenticate" or not isinstance(auth.get("signature"), str):
+            await websocket.close(code=1008)
+            return
+        try:
+            recovered = Account.recover_message(encode_defunct(text=challenge), signature=auth["signature"])
+        except Exception:
+            recovered = None
+        if not recovered or recovered.lower() != agent_id.lower():
+            await websocket.send_json({"error": "invalid_identity_signature"})
+            await websocket.close(code=1008)
+            return
+        agent_id = recovered.lower()
+        safe_profile = {"agent_id": agent_id, "capabilities": capabilities, "pricing": pricing, "identity_verified": True}
         async with state_lock:
             reject = "duplicate_id" if agent_id in active_agents else ("registry_full" if len(active_agents) >= MAX_AGENTS else None)
             if not reject:
@@ -234,7 +278,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
             await websocket.send_json({"error": reject})
             await websocket.close(code=1008)
             return
-        await websocket.send_json({"status": "registered", "agent_id": agent_id, "fee_rate": 0.02, "payment_settlement": "not_implemented"})
+        await websocket.send_json({"status": "registered", "agent_id": agent_id, "identity_verified": True, "fee_rate": 0.02, "payment_settlement": "not_implemented"})
         while True:
             raw = await websocket.receive_text()
             if len(raw.encode("utf-8")) > MAX_MESSAGE_BYTES:
@@ -248,7 +292,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
             if action == "ping": await websocket.send_json({"action": "pong"})
             elif action == "discover":
                 cap = msg.get("capability")
-                async with state_lock: matches = {k: {"price": v.get("pricing", {}).get(cap, "Negotiable")} for k, v in agent_profiles.items() if cap in v.get("capabilities", []) and k != agent_id}
+                async with state_lock: matches = {k: {"price": v.get("pricing", {}).get(cap, "Negotiable"), "identity_verified": True} for k, v in agent_profiles.items() if cap in v.get("capabilities", []) and k != agent_id and v.get("identity_verified")}
                 await websocket.send_json({"event": "discovery_results", "capability": cap, "matches": matches})
             elif action == "init_trade":
                 try:
@@ -264,7 +308,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
                     seller_ws = active_agents.get(tx.seller_agent)
                     profile = agent_profiles.get(tx.seller_agent)
                     pricing = profile.get("pricing", {}) if isinstance(profile, dict) else {}
-                    if not seller_ws or not profile or tx.item_name not in profile.get("capabilities", []):
+                    if not seller_ws or not profile or not profile.get("identity_verified") or tx.item_name not in profile.get("capabilities", []):
                         error = "seller_unavailable_or_incapable"
                     elif not isinstance(pricing, dict) or not isinstance(pricing.get(tx.item_name), (int, float)) or not math.isfinite(pricing[tx.item_name]) or pricing[tx.item_name] != tx.total_amount:
                         error = "price_mismatch"
