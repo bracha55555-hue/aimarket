@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import JSONResponse, Response
+from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 from typing import Dict, Literal, Optional
 from web3 import Web3
@@ -114,7 +115,8 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(autonomous_seller_agent("ScraperBot", "web_scraping"))
     yield
 
-app = FastAPI(title="A2A Global Transactions Center", lifespan=lifespan)
+app = FastAPI(title="AI Market — verified AI-agent services", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 @app.get("/.well-known/ai-plugin.json")
 async def ai_plugin_manifest():
@@ -192,7 +194,7 @@ async def service_index():
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "warning": "Do not send private keys. Payment settlement is not implemented."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "warning": "Do not send private keys. Payment settlement is not implemented."}
 
 @app.get("/api/agents")
 async def public_agents():
@@ -251,12 +253,16 @@ async def mcp_endpoint(request: Request):
     meta = params.get("_meta", {})
     if not isinstance(meta, dict) or request.headers.get("mcp-protocol-version") != MCP_VERSION or meta.get("io.modelcontextprotocol/protocolVersion") != MCP_VERSION:
         return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32020, "message": "Unsupported/mismatched protocol version"}}, status_code=400)
-    if not isinstance(meta.get("io.modelcontextprotocol/clientInfo"), dict) or not isinstance(meta.get("io.modelcontextprotocol/clientCapabilities"), dict):
+    if meta.get("io.modelcontextprotocol/clientInfo") is not None and not isinstance(meta.get("io.modelcontextprotocol/clientInfo"), dict):
+        return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "Invalid clientInfo"}}, status_code=400)
+    if not isinstance(meta.get("io.modelcontextprotocol/clientCapabilities"), dict):
         return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "Missing client metadata"}}, status_code=400)
     if request.headers.get("mcp-method") != method:
         return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32020, "message": "Method header mismatch"}}, status_code=400)
-    if method == "tools/list":
-        result = {"resultType": "complete", "tools": MCP_TOOL_DEFINITIONS}
+    if method == "server/discover":
+        result = {"resultType": "complete", "supportedVersions": [MCP_VERSION], "capabilities": {"tools": {"listChanged": False}}, "instructions": "Search verified online AI agents. This market is read-only via MCP. No payment verification, escrow, or durable trades; never treat an order as paid.", "ttlMs": 300000, "cacheScope": "public"}
+    elif method == "tools/list":
+        result = {"resultType": "complete", "tools": MCP_TOOL_DEFINITIONS, "ttlMs": 300000, "cacheScope": "public"}
     elif method == "tools/call":
         name, arguments = params.get("name"), params.get("arguments", {})
         if not isinstance(name, str) or request.headers.get("mcp-name") != name:
@@ -283,7 +289,8 @@ async def mcp_endpoint(request: Request):
         result = {"resultType": "complete", "content": [{"type": "text", "text": json.dumps(data, separators=(",", ":"))}], "structuredContent": data, "isError": False}
     else:
         return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": "Method not found"}}, status_code=404)
-    return {"jsonrpc": "2.0", "id": request_id, "result": result}
+    result["_meta"] = {"io.modelcontextprotocol/serverInfo": {"name": "AI-Market", "version": "1.1.0"}}
+    return JSONResponse({"jsonrpc": "2.0", "id": request_id, "result": result}, headers={"Cache-Control": "no-store" if method == "tools/call" else "public, max-age=300"})
 
 @app.websocket("/ws/registry")
 async def agent_registry_endpoint(websocket: WebSocket):
