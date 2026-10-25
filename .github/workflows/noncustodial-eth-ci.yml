@@ -1,0 +1,77 @@
+name: Verify noncustodial ETH payments
+on:
+  push:
+    branches: [payments/noncustodial-ethereum-20261025]
+permissions:
+  contents: read
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt httpx
+      - run: python -m py_compile app.py
+      - name: Test invoice signatures and onchain receipt verification without moving money
+        run: |
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          from eth_account import Account
+          from eth_account.messages import encode_defunct
+          import app as m
+          seller=Account.create()
+          buyer=Account.create()
+          order="a"*32
+          amount=10000000000000000
+          empty=m.EthInvoice(order_id=order,buyer=buyer.address,seller=seller.address,
+                             amount_wei=amount,seller_signature="placeholder")
+          text=m.eth_invoice_text(empty)
+          signature=Account.sign_message(encode_defunct(text=text),seller.key).signature.hex()
+          invoice=m.EthInvoice(order_id=order,buyer=buyer.address,seller=seller.address,
+                               amount_wei=amount,seller_signature=signature)
+          with TestClient(m.app) as c:
+              quote=c.post("/api/payments/eth/quote",json=invoice.model_dump())
+              assert quote.status_code==200, quote.text
+              q=quote.json()
+              assert q["fee_wei"]==amount//50 and q["seller_wei"]==amount-amount//50
+              assert len(q["transactions"])==2
+              assert q["transactions"][1]["to"]==m.FEE_WALLETS["ETH"]
+              assert q["transactions"][0]["data"]==q["transactions"][1]["data"]
+              assert c.get("/client/eth-pay.js").status_code==200
+              changed=invoice.model_dump()
+              changed["amount_wei"]+=1
+              assert c.post("/api/payments/eth/quote",json=changed).status_code==422
+              seller_hash="0x"+"1"*64
+              fee_hash="0x"+"2"*64
+              sender=buyer.address
+              transactions={
+                seller_hash:{"from":sender,"to":seller.address,"value":q["seller_wei"],
+                             "input":q["memo"],"chainId":1},
+                fee_hash:{"from":sender,"to":m.FEE_WALLETS["ETH"],"value":q["fee_wei"],
+                          "input":q["memo"],"chainId":1},
+              }
+              class FakeEth:
+                  chain_id=1
+                  block_number=120
+                  def get_transaction(self,h): return transactions[h]
+                  def get_transaction_receipt(self,h): return {"status":1,"blockNumber":100}
+              class FakeW3:
+                  eth=FakeEth()
+                  def is_connected(self): return True
+              m.w3=FakeW3()
+              proof={**invoice.model_dump(),"seller_tx":seller_hash,"fee_tx":fee_hash}
+              verified=c.post("/api/payments/eth/verify",json=proof)
+              assert verified.status_code==200, verified.text
+              assert verified.json()["payment_verified"] is True
+              assert verified.json()["status"]=="verified"
+              transactions[seller_hash]["value"]-=1
+              assert c.post("/api/payments/eth/verify",json=proof).json()["payment_verified"] is False
+              transactions[seller_hash]["value"]+=1
+              m.w3.eth.block_number=105
+              assert c.post("/api/payments/eth/verify",json=proof).json()["payment_verified"] is False
+              assert c.post("/api/payments/eth/verify",json={**proof,"fee_tx":seller_hash}).json()["payment_verified"] is False
+          print("PASS: no funds moved, signatures bound to price, both receipts required")
+          PY
