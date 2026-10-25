@@ -15,6 +15,59 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements.txt httpx
       - run: python -m py_compile app.py
+
+      - name: Check full agent trade handoff and no false payment receipt
+        run: |
+          python - <<'PY'
+          from eth_account import Account
+          from eth_account.messages import encode_defunct
+          from fastapi.testclient import TestClient
+          import app as m
+          def sign_agent(ws, a, services, price):
+              ws.send_json({"agent_id":a.address.lower(),"capabilities":services,"pricing":price})
+              challenge=ws.receive_json()
+              assert challenge["event"]=="auth_challenge"
+              signature=Account.sign_message(encode_defunct(text=challenge["message"]),a.key).signature.hex()
+              ws.send_json({"action":"authenticate","signature":signature})
+              assert ws.receive_json()["status"]=="registered"
+          buyer=Account.create();seller=Account.create()
+          with TestClient(m.app) as client:
+              with client.websocket_connect("/ws/registry") as selling:
+                  sign_agent(selling,seller,["summary"],{"summary":0.01})
+                  with client.websocket_connect("/ws/registry") as buying:
+                      sign_agent(buying,buyer,["research"],{})
+                      buying.send_json({"action":"init_trade","trade_data":{
+                          "buyer_agent":buyer.address.lower(),"seller_agent":seller.address.lower(),
+                          "item_name":"summary","currency":"ETH","total_amount":0.01}})
+                      request=selling.receive_json()
+                      assert request["event"]=="trade_requested"
+                      tid=request["trade_id"]
+                      assert buying.receive_json()["event"]=="trade_created"
+                      selling.send_json({"action":"deliver","trade_id":tid,"payload":{"data":"example"}})
+                      assert buying.receive_json()["event"]=="goods_delivered"
+                      buying.send_json({"action":"confirm_receipt","trade_id":tid})
+                      pending=buying.receive_json()
+                      assert pending["event"]=="payment_required"
+                      assert pending["result"]["fee_paid"]==0
+                      assert selling.receive_json()["event"]=="delivery_confirmed"
+                      challenge=selling.receive_json()
+                      assert challenge["event"]=="sign_eth_invoice"
+                      signature=Account.sign_message(encode_defunct(text=challenge["message"]),seller.key).signature.hex()
+                      selling.send_json({"action":"authorize_eth_invoice","trade_id":tid,"signature":signature})
+                      authorized=buying.receive_json()
+                      assert authorized["event"]=="payment_authorized"
+                      assert authorized["quote"]["fee_wei"]==200000000000000
+                      assert selling.receive_json()["event"]=="invoice_authorized"
+                      proof={**authorized["invoice"],"seller_tx":"0x"+"1"*64,"fee_tx":"0x"+"2"*64}
+                      class NoRPC:
+                          def is_connected(self): return False
+                      m.w3=NoRPC()
+                      buying.send_json({"action":"submit_eth_payment_proof","trade_id":tid,"proof":proof})
+                      outcome=buying.receive_json()
+                      assert outcome["event"]=="payment_pending",outcome
+                      assert outcome["result"]["payment_verified"] is False
+          print("PASS: no false settlement and full handoff")
+          PY
       - name: Test invoice signatures and onchain receipt verification without moving money
         run: |
           python - <<'PY'
