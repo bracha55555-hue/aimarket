@@ -1,7 +1,9 @@
 name: Agent onboarding and adoption safety
 on:
   push:
-    branches: [growth/agent-discovery-onboarding-20261026]
+    branches: [main, growth/agent-discovery-onboarding-20261026]
+  pull_request:
+    branches: [main]
 permissions:
   contents: read
 jobs:
