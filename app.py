@@ -222,6 +222,22 @@ async def process_trade_fees(tx: TradeTransaction):
     return {"status": "payment_required", "currency": tx.currency, "total_amount": tx.total_amount, "estimated_fee_due": tx.total_amount * 0.02, "estimated_seller_payout_due": tx.total_amount * 0.98, "fee_wallet": FEE_WALLETS[tx.currency], "fee_paid": 0, "seller_paid": False, "payment_verified": False}
 
 
+@app.head("/")
+async def index_head():
+    return Response(status_code=200,headers={"Cache-Control":"public, max-age=120"})
+
+@app.head("/health")
+async def health_head():
+    return Response(status_code=200,headers={"Cache-Control":"no-store"})
+
+@app.head("/.well-known/ai-market.json")
+async def discovery_head():
+    return Response(status_code=200,headers={"Cache-Control":"public, max-age=300"})
+
+@app.head("/mcp")
+async def mcp_discovery_head():
+    return Response(status_code=200,headers={"Allow":"POST"})
+
 @app.get("/robots.txt")
 async def robots_txt():
     return Response("User-agent: *\nAllow: /\nSitemap: "+PUBLIC_SERVER_URL.rstrip("/")+"/sitemap.xml\n",media_type="text/plain")
