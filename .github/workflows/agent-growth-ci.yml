@@ -1,0 +1,74 @@
+name: Agent onboarding and adoption safety
+on:
+  push:
+    branches: [growth/agent-discovery-onboarding-20261026]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r requirements.txt httpx
+      - run: python -m py_compile app.py
+      - name: Test discovery, first-agent onboarding, honest counters and no currency regressions
+        run: |
+          python - <<'PY'
+          import ast, app as m
+          from fastapi.testclient import TestClient
+          from eth_account import Account
+          from eth_account.messages import encode_defunct
+          with TestClient(m.app) as c:
+              assert c.get('/').status_code == 200
+              html = c.get('/', headers={'accept':'text/html'})
+              assert html.status_code == 200 and '<h1>AI Market' in html.text
+              assert '<a href="/client/connect-agent.py">' in html.text
+              r = c.get('/robots.txt')
+              assert r.status_code == 200 and 'Sitemap:' in r.text
+              assert 'sitemap.xml' in r.text
+              assert '<urlset' in c.get('/sitemap.xml').text
+              assert 'agent' in c.get('/llms.txt').text.lower()
+              guide=c.get('/api/onboarding').json()
+              assert guide['fee_rate'] == 0.02
+              assert 'wss://' in guide['websocket']
+              helper=c.get('/client/connect-agent.py')
+              assert helper.status_code == 200
+              ast.parse(helper.text)
+              assert 'Account.sign_message' in helper.text
+              assert 'AIMARKET_AGENT_PRIVATE_KEY' in helper.text
+              assert 'send_raw_transaction' not in helper.text
+              stats=c.get('/api/market/stats').json()
+              assert stats['authenticated_online_agents'] == 0
+              assert stats['events_since_start']['registered'] == 0
+              agent=Account.create()
+              with c.websocket_connect('/ws/registry') as ws:
+                  ws.send_json({'agent_id':agent.address.lower(),'capabilities':['translation'],
+                                'pricing':{'translation':0.01}})
+                  ch=ws.receive_json()
+                  assert ch['event']=='auth_challenge'
+                  signed=Account.sign_message(encode_defunct(text=ch['message']),agent.key).signature.hex()
+                  ws.send_json({'action':'authenticate','signature':signed})
+                  welcome=ws.receive_json()
+                  assert welcome['status']=='registered' and welcome['identity_verified'] is True
+                  stats=c.get('/api/market/stats').json()
+                  assert stats['authenticated_online_agents'] == 1
+                  assert stats['events_since_start']['registered']==1
+                  assert stats['available_service_offers'] == 1
+                  catalog=c.get('/api/agents').json()
+                  assert catalog['count']==1
+                  ws.send_json({'action':'discover','capability':'translation'})
+                  assert ws.receive_json()['event']=='discovery_results'
+                  assert c.get('/api/market/stats').json()['events_since_start']['discovery_queries']==1
+                  ws.send_json({'action':'ping'})
+                  assert ws.receive_json()['action']=='pong'
+              assert c.get('/api/market/stats').json()['authenticated_online_agents']==0
+              assert all(chain in m.FEE_WALLETS for chain in ['BTC','ETH','SOL','TRX'])
+              for call in (m.verify_eth_invoice,m.verify_btc_proof,m.verify_solana_payment,m.verify_tron_payment):
+                  assert callable(call)
+              assert c.get('/api/market/stats').json()['events_since_start']['settlements_verified'] == 0
+          print('PASS: onboarding, discovery and counters; no wallet operations')
+          PY
