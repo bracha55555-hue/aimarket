@@ -1,7 +1,7 @@
 name: Agent onboarding and adoption safety
 on:
   push:
-    branches: [main, growth/agent-discovery-onboarding-20261026]
+    branches: [main, growth/agent-frictionless-demand-20261026]
   pull_request:
     branches: [main]
 permissions:
@@ -41,7 +41,8 @@ jobs:
                   with open(path,"w",encoding="utf-8") as h:h.write(source)
                   env=dict(os.environ)
                   env["AIMARKET_WS_URL"]="ws://127.0.0.1:8897/ws/registry"
-                  env["AIMARKET_AGENT_PRIVATE_KEY"]=Account.create().key.hex()
+                  env.pop("AIMARKET_AGENT_PRIVATE_KEY",None)
+                  env["AIMARKET_IDENTITY_FILE"]=os.path.join(directory,"identity-only.key")
                   env["AIMARKET_SERVICES"]='{"proofreading":0.01}'
                   client=subprocess.Popen([sys.executable,"-u",path],env=env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
                   for i in range(90):
@@ -51,6 +52,8 @@ jobs:
                       if stats["authenticated_online_agents"]==1:
                           assert stats["available_service_offers"]==1
                           assert stats["events_since_start"]["registered"]==1
+                          assert os.path.isfile(env["AIMARKET_IDENTITY_FILE"])
+                          assert (os.stat(env["AIMARKET_IDENTITY_FILE"]).st_mode & 0o077)==0
                           print("Live local WebSocket and downloadable agent client PASS")
                           break
                       time.sleep(0.2)
@@ -63,6 +66,64 @@ jobs:
               server.terminate()
               try:server.wait(timeout=3)
               except subprocess.TimeoutExpired:server.kill()
+          PY
+      - name: Buyer requests, agent matching and zero-registration discovery
+        run: |
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          from eth_account import Account
+          from eth_account.messages import encode_defunct
+          import app as m
+          def login(ws,key,caps,prices):
+              ws.send_json({"agent_id":key.address.lower(),"capabilities":caps,"pricing":prices})
+              challenge=ws.receive_json()
+              assert challenge["event"]=="auth_challenge"
+              sign=Account.sign_message(encode_defunct(text=challenge["message"]),key.key).signature.hex()
+              ws.send_json({"action":"authenticate","signature":sign})
+              assert ws.receive_json()["status"]=="registered"
+          buyer=Account.create(); seller=Account.create()
+          with TestClient(m.app) as client:
+              assert client.get("/api/agent/now").status_code==200
+              assert client.get("/api/agent/now").json()["browse_without_wallet"]
+              assert client.get("/api/requests").json()["count"]==0
+              with client.websocket_connect("/ws/registry") as selling:
+                  login(selling,seller,["translation"],{"translation":0.02})
+                  with client.websocket_connect("/ws/registry") as buying:
+                      login(buying,buyer,[],{})
+                      buying.send_json({"action":"publish_need","capability":"translation","currency":"ETH","max_budget":0.03})
+                      posted=buying.receive_json()
+                      assert posted["event"]=="request_published" and not posted["funds_reserved"]
+                      rid=posted["request"]["id"]
+                      alert=selling.receive_json()
+                      assert alert["event"]=="matching_buyer_request"
+                      assert alert["request"]["id"]==rid
+                      buying.send_json({"action":"publish_need","capability":"translation","currency":"ETH","max_budget":0.03})
+                      duplicate=buying.receive_json()
+                      assert duplicate["event"]=="request_published" and duplicate["request"]["id"]==rid and not duplicate["new"]
+                      requests=client.get("/api/requests").json()
+                      assert requests["count"]==1 and not requests["funds_reserved"]
+                      overview=client.get("/api/agent/now?capability=translat").json()
+                      assert overview["available_agents_count"]==1
+                      assert overview["real_requests_count"]==1
+                      buying.send_json({"action":"publish_need","capability":"translation","currency":"ETH","max_budget":False})
+                      assert buying.receive_json()["error"]=="invalid_buyer_request"
+                      buying.send_json({"action":"publish_need","capability":"translation","currency":[],"max_budget":0.03})
+                      assert buying.receive_json()["error"]=="invalid_buyer_request"
+                      selling.send_json({"action":"my_matches"})
+                      result=selling.receive_json()
+                      assert result["event"]=="matching_requests" and len(result["requests"])==1
+                      buying.send_json({"action":"cancel_need","request_id":rid})
+                      assert buying.receive_json()["removed"]
+                      assert client.get("/api/requests").json()["count"]==0
+                      buying.send_json({"action":"publish_need","capability":"translation","currency":"BTC","max_budget":0.01})
+                      posted=buying.receive_json()
+                      assert posted["event"]=="request_published"
+                      assert selling.receive_json()["event"]=="matching_buyer_request"
+                      m.expire_stale_trades(now=m.open_needs[posted["request"]["id"]]["created_monotonic"]+m.NEED_TTL_SECONDS+1)
+                      assert client.get("/api/requests").json()["count"]==0
+                      assert client.get("/api/market/stats").json()["events_since_start"]["requests_published"]==2
+              assert client.get("/api/market/stats").json()["authenticated_online_agents"]==0
+          print("PASS genuine requests and matching without real payments")
           PY
       - name: Test discovery, first-agent onboarding, honest counters and no currency regressions
         run: |
