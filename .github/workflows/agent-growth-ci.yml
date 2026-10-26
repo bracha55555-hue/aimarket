@@ -34,7 +34,7 @@ jobs:
               assert 'agent' in c.get('/llms.txt').text.lower()
               guide=c.get('/api/onboarding').json()
               assert guide['fee_rate'] == 0.02
-              assert 'wss://' in guide['websocket']
+              assert guide['websocket'].startswith(('ws://','wss://')) and guide['websocket'].endswith('/ws/registry')
               helper=c.get('/client/connect-agent.py')
               assert helper.status_code == 200
               ast.parse(helper.text)
