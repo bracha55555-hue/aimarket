@@ -482,6 +482,8 @@ async def auth_guide():
 MCP_VERSION = "2026-07-28"
 MCP_TOOL_DEFINITIONS = [
     {"name": "search_agents", "title": "Find verified service providers", "description": "List online identity-verified AI agents offering the requested capability. Read-only; availability is ephemeral and not a promise of service delivery.", "inputSchema": {"type": "object", "properties": {"capability": {"type": "string", "description": "Exact advertised capability name, or omit to see all verified agents"}}, "additionalProperties": False}},
+    {"name": "real_buyer_requests", "title": "Actual buyer requests", "description": "See requests posted by authenticated buyers. No funds are reserved or income guaranteed.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"name": "market_in_one_call", "title": "Agent market at a glance", "description": "One read-only request for agent supply, buyer demand and onboarding instructions without signup.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "marketplace_status", "title": "AI Market status", "description": "Read current market availability and explicit payment/escrow limitations. Never treat an order as paid.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "integration_guide", "title": "How AI agents join", "description": "Read the signed wallet challenge-response integration guide and contact endpoints.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}}
 ]
@@ -534,6 +536,14 @@ async def mcp_endpoint(request: Request):
             async with state_lock:
                 matches = [{"agent_id": k, "capabilities": p["capabilities"], "pricing": p["pricing"], "identity_verified": True} for k, p in agent_profiles.items() if p.get("identity_verified") and (not capability or capability in p["capabilities"])]
             data = {"agents": matches[:100], "count": len(matches), "persistent": False}
+        elif name == "real_buyer_requests":
+            if arguments:
+                return JSONResponse({"jsonrpc":"2.0","id":request_id,"error":{"code":-32602,"message":"No arguments expected"}},status_code=400)
+            data = await public_requests()
+        elif name == "market_in_one_call":
+            if arguments:
+                return JSONResponse({"jsonrpc":"2.0","id":request_id,"error":{"code":-32602,"message":"No arguments expected"}},status_code=400)
+            data = await agent_fast_start()
         elif name == "marketplace_status":
             if arguments:
                 return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "No arguments expected"}}, status_code=400)
@@ -1207,6 +1217,13 @@ async def agent_registry_endpoint(websocket: WebSocket):
             return
         await websocket.send_json({"status": "registered", "agent_id": agent_id, "identity_verified": True, "fee_rate": 0.02, "payment_settlement": "proof_required"})
         usage_event("registered")
+        async with state_lock:
+            expire_stale_trades()
+            matches=[public_need(need) for need in open_needs.values()
+                     if need["buyer"]!=agent_id and need["capability"] in safe_profile["capabilities"]]
+        if matches:
+            await websocket.send_json({"event":"matching_requests","requests":matches,
+                                       "note":"Buyer requests are not funded orders"})
         while True:
             raw = await websocket.receive_text()
             if len(raw.encode("utf-8")) > MAX_MESSAGE_BYTES:
@@ -1223,6 +1240,63 @@ async def agent_registry_endpoint(websocket: WebSocket):
                 cap = msg.get("capability")
                 async with state_lock: matches = {k: {"price": v.get("pricing", {}).get(cap, "Negotiable"), "identity_verified": True} for k, v in agent_profiles.items() if cap in v.get("capabilities", []) and k != agent_id and v.get("identity_verified")}
                 await websocket.send_json({"event": "discovery_results", "capability": cap, "matches": matches})
+            elif action == "publish_need":
+                capability=msg.get("capability")
+                currency=msg.get("currency")
+                budget=msg.get("max_budget")
+                if (not isinstance(capability,str) or not 1<=len(capability.strip())<=64
+                    or any(ord(ch)<32 for ch in capability) or currency not in FEE_WALLETS
+                    or isinstance(budget,bool) or not isinstance(budget,(int,float))
+                    or not math.isfinite(budget) or not 0.00000001<=budget<=100000):
+                    await websocket.send_json({"error":"invalid_buyer_request"})
+                    continue
+                capability=capability.strip()
+                async with state_lock:
+                    expire_stale_trades()
+                    own=sum(n["buyer"]==agent_id for n in open_needs.values())
+                    if own>=3 or len(open_needs)>=MAX_PUBLIC_NEEDS:
+                        error="buyer_request_limit"
+                        alert=[]
+                    else:
+                        error=None
+                        nid=uuid.uuid4().hex
+                        now=datetime.now(timezone.utc)
+                        need={"id":nid,"buyer":agent_id,"capability":capability,"currency":currency,
+                              "max_budget":budget,"created_at":now.isoformat(),
+                              "expires_at":datetime.fromtimestamp(time.time()+NEED_TTL_SECONDS,timezone.utc).isoformat(),
+                              "created_monotonic":time.monotonic()}
+                        open_needs[nid]=need
+                        alert=[conn for seller,conn in active_agents.items()
+                               if seller!=agent_id and capability in agent_profiles.get(seller,{}).get("capabilities",[])]
+                if error:
+                    await websocket.send_json({"error":error})
+                    continue
+                usage_event("requests_published")
+                await websocket.send_json({"event":"request_published","request":public_need(need),
+                                           "funds_reserved":False,"expires_in_seconds":NEED_TTL_SECONDS})
+                for conn in alert:
+                    try: await conn.send_json({"event":"matching_buyer_request","request":public_need(need),
+                                               "funds_reserved":False})
+                    except Exception: pass
+            elif action == "cancel_need":
+                nid=msg.get("request_id")
+                async with state_lock:
+                    item=open_needs.get(nid) if isinstance(nid,str) else None
+                    if item and item["buyer"]==agent_id:
+                        open_needs.pop(nid,None)
+                        removed=True
+                    else:
+                        removed=False
+                if removed: usage_event("requests_cancelled")
+                await websocket.send_json({"event":"request_cancelled","request_id":nid,"removed":removed})
+            elif action == "my_matches":
+                async with state_lock:
+                    expire_stale_trades()
+                    services=agent_profiles.get(agent_id,{}).get("capabilities",[])
+                    matching=[public_need(need) for need in open_needs.values()
+                              if need["buyer"]!=agent_id and need["capability"] in services]
+                await websocket.send_json({"event":"matching_requests","requests":matching,
+                                           "note":"Identity-signed requests; not guaranteed funded"})
             elif action == "init_trade":
                 try:
                     data = msg.get("trade_data", {})
