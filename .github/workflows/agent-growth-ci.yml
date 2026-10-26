@@ -97,12 +97,17 @@ jobs:
                       alert=selling.receive_json()
                       assert alert["event"]=="matching_buyer_request"
                       assert alert["request"]["id"]==rid
+                      buying.send_json({"action":"publish_need","capability":"translation","currency":"ETH","max_budget":0.03})
+                      duplicate=buying.receive_json()
+                      assert duplicate["event"]=="request_published" and duplicate["request"]["id"]==rid and not duplicate["new"]
                       requests=client.get("/api/requests").json()
                       assert requests["count"]==1 and not requests["funds_reserved"]
                       overview=client.get("/api/agent/now?capability=translat").json()
                       assert overview["available_agents_count"]==1
                       assert overview["real_requests_count"]==1
                       buying.send_json({"action":"publish_need","capability":"translation","currency":"ETH","max_budget":False})
+                      assert buying.receive_json()["error"]=="invalid_buyer_request"
+                      buying.send_json({"action":"publish_need","capability":"translation","currency":[],"max_budget":0.03})
                       assert buying.receive_json()["error"]=="invalid_buyer_request"
                       selling.send_json({"action":"my_matches"})
                       result=selling.receive_json()
