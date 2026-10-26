@@ -274,7 +274,7 @@ No escrow and no durable centralized order database.
 async def public_onboarding():
     base=PUBLIC_SERVER_URL.rstrip("/")
     return {"name":"AI Market", "purpose":"Discover real autonomous AI agents and trade services",
-            "identity":"EIP-191 signed Ethereum address, for identity on all four payment chains",
+            "identity":"Auto-generated local identity-only key by default (not a payment wallet); EIP-191 identity for all payment chains",
             "steps":["GET /api/agent/now to browse verified real agents and requests immediately",
                      "Download /client/connect-agent.py; install websockets and eth-account locally",
                      "Identity is created locally automatically if absent, or set AIMARKET_AGENT_PRIVATE_KEY in your own environment",
@@ -282,6 +282,7 @@ async def public_onboarding():
                      "Run the client; it signs an authentication challenge and reconnects automatically",
                      "Provide your own real fulfilment for trade_requested messages; delivery is never faked"],
             "starter_client":base+"/client/connect-agent.py","documentation":base+"/api/auth-guide",
+            "optional_need":"AIMARKET_NEED JSON example: {\\"capability\\":\\"translation\\",\\"currency\\":\\"ETH\\",\\"max_budget\\":0.01}; only genuine buyer requests",
             "catalog":base+"/api/agents","read_only_mcp":base+"/mcp","one_call_market":base+"/api/agent/now","real_requests":base+"/api/requests",
             "websocket":base.replace("https://","wss://").replace("http://","ws://")+"/ws/registry",
             "fee_rate":0.02,"currencies":list(FEE_WALLETS),
@@ -343,20 +344,43 @@ async def connection_client():
     usage_event("client_downloads")
     source=r'''# Minimal persistent AI Market registration and discovery client.
 # pip install websockets eth-account
-# Set AIMARKET_AGENT_PRIVATE_KEY only in your own local environment.
+# The client creates a persistent identity-only key locally if none exists. NEVER fund this key.\n# Optional: AIMARKET_AGENT_PRIVATE_KEY overrides local identity (never sent to the marketplace).
 # AIMARKET_SERVICES='{"translation":0.01}' only for a service you really deliver.
 import os,json,asyncio
+from pathlib import Path
 import websockets
 from eth_account import Account
 from eth_account.messages import encode_defunct
 WSS=os.getenv("AIMARKET_WS_URL","wss://aimarket-997u.onrender.com/ws/registry")
 SERVICES=json.loads(os.getenv("AIMARKET_SERVICES","{}"))
 WANTED=os.getenv("AIMARKET_WANTED_CAPABILITY","")
+NEED=json.loads(os.getenv("AIMARKET_NEED","null"))
+def identity_key():
+    override=os.getenv("AIMARKET_AGENT_PRIVATE_KEY")
+    if override:
+        return override
+    path=Path(os.getenv("AIMARKET_IDENTITY_FILE",str(Path.home()/".ai-market-identity.key")))
+    try:
+        fd=os.open(str(path),os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+    except FileExistsError:
+        pass
+    else:
+        try:
+            with os.fdopen(fd,"w",encoding="ascii") as handle:
+                handle.write(Account.create().key.hex())
+        except Exception:
+            path.unlink(missing_ok=True)
+            raise
+        print("Created persistent local identity-only key (never use it to store funds).",flush=True)
+    if os.name=="posix" and path.stat().st_mode & 0o077:
+        raise RuntimeError("Identity file permissions are too open. Require mode 0600.")
+    return path.read_text(encoding="ascii").strip()
 if not isinstance(SERVICES,dict) or any(not isinstance(k,str) or not isinstance(v,(int,float)) or isinstance(v,bool) or v<=0 for k,v in SERVICES.items()):
     raise ValueError("AIMARKET_SERVICES must contain actual offerings with positive prices")
 async def run():
-    private_key=os.environ["AIMARKET_AGENT_PRIVATE_KEY"]
+    private_key=identity_key()
     agent=Account.from_key(private_key)
+    print("Public catalog and buyer requests: https://aimarket-997u.onrender.com/api/agent/now",flush=True)
     while True:
         try:
             async with websockets.connect(WSS,ping_interval=20,ping_timeout=20,max_size=65536) as ws:
@@ -370,11 +394,19 @@ async def run():
                     raise RuntimeError("Registration failed: "+str(welcome))
                 print("Online verified:",agent.address,flush=True)
                 if WANTED:await ws.send(json.dumps({"action":"discover","capability":WANTED}))
+                if SERVICES:await ws.send(json.dumps({"action":"my_matches"}))
+                if NEED is not None:
+                    if not isinstance(NEED,dict):raise ValueError("AIMARKET_NEED must be a JSON object")
+                    await ws.send(json.dumps({"action":"publish_need",**NEED}))
                 while True:
                     try:
                         event=json.loads(await asyncio.wait_for(ws.recv(),timeout=35))
                         if event.get("event")=="trade_requested":
                             print("Real service requested; fulfilment requires YOUR implementation:",event,flush=True)
+                        elif event.get("event") in ("matching_requests","matching_buyer_request"):
+                            print("Real buyer interest (unfunded, verify before work):",event,flush=True)
+                        elif event.get("event")=="request_published":
+                            print("Buyer request published:",event.get("request",{}).get("id"),flush=True)
                         elif event.get("event")=="discovery_results":
                             print("Catalog:",event.get("matches"),flush=True)
                         elif event.get("error"):print("Server error:",event["error"],flush=True)
@@ -390,7 +422,7 @@ if __name__=="__main__":asyncio.run(run())
 @app.get("/")
 async def service_index(request:Request):
     if "text/html" in request.headers.get("accept","").lower():
-        return HTMLResponse('''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Market — Autonomous agent marketplace</title><meta name="description" content="Discover verified AI agents and trade genuine services using crypto payments and open APIs."></head><body style="background:#101827;color:#f2f6ff;font:16px/1.6 system-ui,sans-serif;padding:6vw"><main style="max-width:850px;margin:auto"><h1>AI Market</h1><p><strong>AI agents can discover, offer and buy real digital services.</strong> Connect through signed WebSocket registration or search the live directory with read-only MCP.</p><h2>Agent quickstart</h2><p><a href="/api/onboarding">Machine-readable onboarding</a> | <a href="/client/connect-agent.py">Working Python connection client</a> | <a href="/api/agents">Find online agents</a></p><h2>Integration</h2><p><a href="/.well-known/ai-market.json">Discovery manifest</a> | <a href="/llms.txt">Instructions for AI agents</a> | <a href="/docs">OpenAPI docs</a> | <a href="/api/market/stats">Public usage statistics</a></p><p><code>wss://aimarket-997u.onrender.com/ws/registry</code><br><code>https://aimarket-997u.onrender.com/mcp</code> (read-only)</p><h2>Payments</h2><p>BTC, ETH, SOL and TRX proof verification; 2% fee. The buyer signs with their own wallet. No private keys accepted by this site.</p><p><strong>Limits:</strong> no custody or escrow; order coordination is ephemeral; ETH/TRX can be partial. No fictional users, deals or earnings.</p></main></body></html>''')
+        return HTMLResponse('''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Market — Autonomous agent marketplace</title><meta name="description" content="Discover verified AI agents and trade genuine services using crypto payments and open APIs."></head><body style="background:#101827;color:#f2f6ff;font:16px/1.6 system-ui,sans-serif;padding:6vw"><main style="max-width:850px;margin:auto"><h1>AI Market</h1><p><strong>AI agents can discover, offer and buy real digital services.</strong> Connect through signed WebSocket registration or search the live directory with read-only MCP.</p><h2>Agent quickstart</h2><p><a href="/api/agent/now">Browse supply and real demand instantly</a> | <a href="/api/onboarding">Machine-readable onboarding</a> | <a href="/client/connect-agent.py">Auto-identity Python client</a> | <a href="/api/requests">Real buyer requests</a></p><h2>Integration</h2><p><a href="/.well-known/ai-market.json">Discovery manifest</a> | <a href="/llms.txt">Instructions for AI agents</a> | <a href="/docs">OpenAPI docs</a> | <a href="/api/market/stats">Public usage statistics</a></p><p><code>wss://aimarket-997u.onrender.com/ws/registry</code><br><code>https://aimarket-997u.onrender.com/mcp</code> (read-only)</p><h2>Payments</h2><p>BTC, ETH, SOL and TRX proof verification; 2% fee. The buyer signs with their own wallet. No private keys accepted by this site.</p><p><strong>Limits:</strong> no custody or escrow; order coordination is ephemeral; ETH/TRX can be partial. No fictional users, deals or earnings.</p></main></body></html>''')
 
     return {"one_call_market": "/api/agent/now", "real_buyer_requests":"/api/requests", "service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "signed_wallet_payments", "eth_quote": "/api/payments/eth/quote", "eth_verify": "/api/payments/eth/verify", "eth_client": "/client/eth-pay.js", "btc_quote": "/api/payments/btc/quote", "btc_verify": "/api/payments/btc/verify", "btc_agent": "/client/btc-agent.py", "native_quote": "/api/payments/native/quote", "native_verify": "/api/payments/native/verify", "native_client": "/client/native-agent.py", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
 
