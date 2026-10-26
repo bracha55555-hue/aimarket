@@ -387,7 +387,19 @@ async def run():
                 await ws.send(json.dumps({"agent_id":agent.address.lower(),"capabilities":list(SERVICES),"pricing":SERVICES}))
                 challenge=json.loads(await asyncio.wait_for(ws.recv(),timeout=25))
                 if challenge.get("event")!="auth_challenge":raise RuntimeError("Challenge not received")
-                signature=Account.sign_message(encode_defunct(text=challenge["message"]),private_key).signature.hex()
+                message=challenge.get("message","")
+                lines=message.splitlines() if isinstance(message,str) else []
+                expected_origin=os.getenv("AIMARKET_EXPECTED_ORIGIN",
+                    "https://aimarket-997u.onrender.com" if WSS.startswith("wss://aimarket-997u.onrender.com/")
+                    else "http://localhost:7860")
+                valid=(len(lines)==4 and lines[0]=="AI Market agent authentication"
+                    and lines[1]=="Origin: "+expected_origin.rstrip("/")
+                    and lines[2]=="Identity: "+agent.address.lower()
+                    and lines[3].startswith("Nonce: ")
+                    and len(lines[3][7:])==64
+                    and all(ch in "0123456789abcdef" for ch in lines[3][7:]))
+                if not valid:raise RuntimeError("Refusing unexpected authentication signature request")
+                signature=Account.sign_message(encode_defunct(text=message),private_key).signature.hex()
                 await ws.send(json.dumps({"action":"authenticate","signature":signature}))
                 welcome=json.loads(await asyncio.wait_for(ws.recv(),timeout=25))
                 if welcome.get("status")!="registered" or welcome.get("identity_verified") is not True:
