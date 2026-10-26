@@ -1277,7 +1277,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
                 currency=msg.get("currency")
                 budget=msg.get("max_budget")
                 if (not isinstance(capability,str) or not 1<=len(capability.strip())<=64
-                    or any(ord(ch)<32 for ch in capability) or currency not in FEE_WALLETS
+                    or any(ord(ch)<32 for ch in capability) or not isinstance(currency,str) or currency not in FEE_WALLETS
                     or isinstance(budget,bool) or not isinstance(budget,(int,float))
                     or not math.isfinite(budget) or not 0.00000001<=budget<=100000):
                     await websocket.send_json({"error":"invalid_buyer_request"})
@@ -1285,12 +1285,22 @@ async def agent_registry_endpoint(websocket: WebSocket):
                 capability=capability.strip()
                 async with state_lock:
                     expire_stale_trades()
+                    existing=next((n for n in open_needs.values()
+                                   if n["buyer"]==agent_id and n["capability"]==capability
+                                   and n["currency"]==currency and n["max_budget"]==budget),None)
                     own=sum(n["buyer"]==agent_id for n in open_needs.values())
-                    if own>=3 or len(open_needs)>=MAX_PUBLIC_NEEDS:
+                    if existing:
+                        need=existing
+                        error=None
+                        created=False
+                        alert=[]
+                    elif own>=3 or len(open_needs)>=MAX_PUBLIC_NEEDS:
                         error="buyer_request_limit"
+                        created=False
                         alert=[]
                     else:
                         error=None
+                        created=True
                         nid=uuid.uuid4().hex
                         now=datetime.now(timezone.utc)
                         need={"id":nid,"buyer":agent_id,"capability":capability,"currency":currency,
@@ -1303,9 +1313,9 @@ async def agent_registry_endpoint(websocket: WebSocket):
                 if error:
                     await websocket.send_json({"error":error})
                     continue
-                usage_event("requests_published")
+                if created: usage_event("requests_published")
                 await websocket.send_json({"event":"request_published","request":public_need(need),
-                                           "funds_reserved":False,"expires_in_seconds":NEED_TTL_SECONDS})
+                                           "funds_reserved":False,"new":created,"expires_in_seconds":NEED_TTL_SECONDS})
                 for conn in alert:
                     try: await conn.send_json({"event":"matching_buyer_request","request":public_need(need),
                                                "funds_reserved":False})
