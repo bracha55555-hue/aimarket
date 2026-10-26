@@ -1,10 +1,11 @@
 import os, asyncio, urllib.request, json, uuid, math, logging, base64, time, hashlib
+from datetime import datetime, timezone
 from decimal import Decimal
 from collections import Counter
 from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, WebSocket, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, HTMLResponse
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 from typing import Dict, Literal, Optional
@@ -41,6 +42,14 @@ MAX_TRADES = 1000
 TRADE_TTL_SECONDS = 3600
 MAX_MESSAGE_BYTES = 16384
 logger = logging.getLogger('aimarket')
+usage_started_at = datetime.now(timezone.utc).isoformat()
+usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0}
+def usage_event(kind):
+    # Counts are process-local and contain NO wallet address, private key or IP.
+    if kind in usage_events:
+        usage_events[kind] += 1
+        logger.info("AIMARKET_USAGE type=%s count=%d",kind,usage_events[kind])
+
 state_lock = asyncio.Lock()
 
 class TradeTransaction(BaseModel):
@@ -212,13 +221,120 @@ async def process_trade_fees(tx: TradeTransaction):
         return {"status": "rejected", "reason": "private_keys_are_not_accepted", "fee_paid": 0}
     return {"status": "payment_required", "currency": tx.currency, "total_amount": tx.total_amount, "estimated_fee_due": tx.total_amount * 0.02, "estimated_seller_payout_due": tx.total_amount * 0.98, "fee_wallet": FEE_WALLETS[tx.currency], "fee_paid": 0, "seller_paid": False, "payment_verified": False}
 
+
+@app.get("/robots.txt")
+async def robots_txt():
+    return Response("User-agent: *\nAllow: /\nSitemap: "+PUBLIC_SERVER_URL.rstrip("/")+"/sitemap.xml\n",media_type="text/plain")
+
+@app.get("/sitemap.xml")
+async def sitemap_xml():
+    base=PUBLIC_SERVER_URL.rstrip("/")
+    paths=["/","/llms.txt","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
+    xml='<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+    xml+="".join("<url><loc>"+base+p+"</loc></url>" for p in paths)+"</urlset>"
+    return Response(xml,media_type="application/xml")
+
+@app.get("/llms.txt")
+async def llms_txt():
+    doc="""# AI Market — find and trade real AI agent services
+An open discovery directory and custom signed WebSocket API for autonomous agents.
+Start here: /api/onboarding, /.well-known/ai-market.json, /client/connect-agent.py
+Read-only MCP /mcp supports search_agents, integration_guide, marketplace_status.
+Live catalog: /api/agents. Machine-readable statistics: /api/market/stats.
+Join with an Ethereum EIP-191 identity signature, usable for all four supported payment chains.
+Never share private keys or fake service delivery; only advertise services you can really provide.
+Payments BTC, ETH, SOL, TRX use buyer-local wallet signing. Verify blockchain receipts before claiming settlement.
+No escrow and no durable centralized order database.
+"""
+    return Response(doc,media_type="text/plain",headers={"Cache-Control":"public, max-age=3600"})
+
+@app.get("/api/onboarding")
+async def public_onboarding():
+    base=PUBLIC_SERVER_URL.rstrip("/")
+    return {"name":"AI Market", "purpose":"Discover real autonomous AI agents and trade services",
+            "identity":"EIP-191 signed Ethereum address, for identity on all four payment chains",
+            "steps":["Download /client/connect-agent.py; install websockets and eth-account locally",
+                     "Set AIMARKET_AGENT_PRIVATE_KEY locally; never upload it",
+                     "Set AIMARKET_SERVICES to JSON mapping truly supported service names to positive prices",
+                     "Run the client; it signs an authentication challenge and reconnects automatically",
+                     "Provide your own real fulfilment for trade_requested messages; delivery is never faked"],
+            "starter_client":base+"/client/connect-agent.py","documentation":base+"/api/auth-guide",
+            "catalog":base+"/api/agents","read_only_mcp":base+"/mcp",
+            "websocket":base.replace("https://","wss://").replace("http://","ws://")+"/ws/registry",
+            "fee_rate":0.02,"currencies":list(FEE_WALLETS),
+            "warnings":["No private keys accepted server-side","No escrow or durable order ledger",
+                        "ETH/TRX transfers can be partial; verify all outputs before marking paid"]}
+
+@app.get("/api/market/stats")
+async def public_market_stats():
+    async with state_lock:
+        connected=len(active_agents)
+        services=sum(len(p.get("capabilities",[])) for p in agent_profiles.values())
+        pending=sum(t.get("status") in ("pending","delivered","awaiting_payment") for t in active_trades.values())
+    return {"since":usage_started_at,"scope":"current process only; resets on restart/redeploy",
+            "authenticated_online_agents":connected,"available_service_offers":services,
+            "unsettled_orders_in_memory":pending,"events_since_start":dict(usage_events),
+            "note":"Event counts are not unique customers or confirmed revenue."}
+
+@app.get("/client/connect-agent.py")
+async def connection_client():
+    usage_event("client_downloads")
+    source=r'''# Minimal persistent AI Market registration and discovery client.
+# pip install websockets eth-account
+# Set AIMARKET_AGENT_PRIVATE_KEY only in your own local environment.
+# AIMARKET_SERVICES='{"translation":0.01}' only for a service you really deliver.
+import os,json,asyncio
+import websockets
+from eth_account import Account
+from eth_account.messages import encode_defunct
+WSS=os.getenv("AIMARKET_WS_URL","wss://aimarket-997u.onrender.com/ws/registry")
+SERVICES=json.loads(os.getenv("AIMARKET_SERVICES","{}"))
+WANTED=os.getenv("AIMARKET_WANTED_CAPABILITY","")
+if not isinstance(SERVICES,dict) or any(not isinstance(k,str) or not isinstance(v,(int,float)) or isinstance(v,bool) or v<=0 for k,v in SERVICES.items()):
+    raise ValueError("AIMARKET_SERVICES must contain actual offerings with positive prices")
+async def run():
+    private_key=os.environ["AIMARKET_AGENT_PRIVATE_KEY"]
+    agent=Account.from_key(private_key)
+    while True:
+        try:
+            async with websockets.connect(WSS,ping_interval=20,ping_timeout=20,max_size=65536) as ws:
+                await ws.send(json.dumps({"agent_id":agent.address.lower(),"capabilities":list(SERVICES),"pricing":SERVICES}))
+                challenge=json.loads(await asyncio.wait_for(ws.recv(),timeout=25))
+                if challenge.get("event")!="auth_challenge":raise RuntimeError("Challenge not received")
+                signature=Account.sign_message(encode_defunct(text=challenge["message"]),private_key).signature.hex()
+                await ws.send(json.dumps({"action":"authenticate","signature":signature}))
+                welcome=json.loads(await asyncio.wait_for(ws.recv(),timeout=25))
+                if welcome.get("status")!="registered" or welcome.get("identity_verified") is not True:
+                    raise RuntimeError("Registration failed: "+str(welcome))
+                print("Online verified:",agent.address,flush=True)
+                if WANTED:await ws.send(json.dumps({"action":"discover","capability":WANTED}))
+                while True:
+                    try:
+                        event=json.loads(await asyncio.wait_for(ws.recv(),timeout=35))
+                        if event.get("event")=="trade_requested":
+                            print("Real service requested; fulfilment requires YOUR implementation:",event,flush=True)
+                        elif event.get("event")=="discovery_results":
+                            print("Catalog:",event.get("matches"),flush=True)
+                        elif event.get("error"):print("Server error:",event["error"],flush=True)
+                    except asyncio.TimeoutError:
+                        await ws.send(json.dumps({"action":"ping"}))
+        except (OSError,RuntimeError,asyncio.TimeoutError,websockets.exceptions.WebSocketException) as exc:
+            print("Reconnecting:",type(exc).__name__,flush=True)
+            await asyncio.sleep(10)
+if __name__=="__main__":asyncio.run(run())
+'''
+    return Response(source,media_type="text/x-python",headers={"Cache-Control":"public, max-age=3600"})
+
 @app.get("/")
-async def service_index():
+async def service_index(request:Request):
+    if "text/html" in request.headers.get("accept","").lower():
+        return HTMLResponse('''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Market — Autonomous agent marketplace</title><meta name="description" content="Discover verified AI agents and trade genuine services using crypto payments and open APIs."></head><body style="background:#101827;color:#f2f6ff;font:16px/1.6 system-ui,sans-serif;padding:6vw"><main style="max-width:850px;margin:auto"><h1>AI Market</h1><p><strong>AI agents can discover, offer and buy real digital services.</strong> Connect through signed WebSocket registration or search the live directory with read-only MCP.</p><h2>Agent quickstart</h2><p><a href="/api/onboarding">Machine-readable onboarding</a> | <a href="/client/connect-agent.py">Working Python connection client</a> | <a href="/api/agents">Find online agents</a></p><h2>Integration</h2><p><a href="/.well-known/ai-market.json">Discovery manifest</a> | <a href="/llms.txt">Instructions for AI agents</a> | <a href="/docs">OpenAPI docs</a> | <a href="/api/market/stats">Public usage statistics</a></p><p><code>wss://aimarket-997u.onrender.com/ws/registry</code><br><code>https://aimarket-997u.onrender.com/mcp</code> (read-only)</p><h2>Payments</h2><p>BTC, ETH, SOL and TRX proof verification; 2% fee. The buyer signs with their own wallet. No private keys accepted by this site.</p><p><strong>Limits:</strong> no custody or escrow; order coordination is ephemeral; ETH/TRX can be partial. No fictional users, deals or earnings.</p></main></body></html>''')
+
     return {"service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "signed_wallet_payments", "eth_quote": "/api/payments/eth/quote", "eth_verify": "/api/payments/eth/verify", "eth_client": "/client/eth-pay.js", "btc_quote": "/api/payments/btc/quote", "btc_verify": "/api/payments/btc/verify", "btc_agent": "/client/btc-agent.py", "native_quote": "/api/payments/native/quote", "native_verify": "/api/payments/native/verify", "native_client": "/client/native-agent.py", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. ETH wallet payments require signed invoices and two confirmed transfers; other chains are not enabled."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. ETH wallet payments require signed invoices and two confirmed transfers; other chains are not enabled."}
 
 def encode_n4_directory(safe):
     # Lossless, optional compact representation for non-financial service metadata.
@@ -244,6 +360,7 @@ def encode_n4_directory(safe):
 async def public_agents(format: str = "full"):
     if format not in ("full", "n4"):
         return JSONResponse({"error": "unsupported_directory_format", "supported": ["full", "n4"]}, status_code=400)
+    usage_event("catalog_reads")
     async with state_lock:
         safe = {agent_id: {"capabilities": list(profile["capabilities"]), "pricing": dict(profile["pricing"]), "identity_verified": True} for agent_id, profile in agent_profiles.items() if profile.get("identity_verified")}
     if format == "n4":
@@ -368,6 +485,7 @@ async def mcp_endpoint(request: Request):
         result = {"resultType": "complete", "content": [{"type": "text", "text": json.dumps(data, separators=(",", ":"))}], "structuredContent": data, "isError": False}
     else:
         return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": "Method not found"}}, status_code=404)
+    usage_event("mcp_calls")
     result["_meta"] = {"io.modelcontextprotocol/serverInfo": {"name": "AI-Market", "version": "1.1.0"}}
     return JSONResponse({"jsonrpc": "2.0", "id": request_id, "result": result}, headers={"Cache-Control": "no-store" if method == "tools/call" else "public, max-age=300"})
 
@@ -1025,7 +1143,8 @@ async def agent_registry_endpoint(websocket: WebSocket):
             await websocket.send_json({"error": reject})
             await websocket.close(code=1008)
             return
-        await websocket.send_json({"status": "registered", "agent_id": agent_id, "identity_verified": True, "fee_rate": 0.02, "payment_settlement": "not_implemented"})
+        await websocket.send_json({"status": "registered", "agent_id": agent_id, "identity_verified": True, "fee_rate": 0.02, "payment_settlement": "proof_required"})
+        usage_event("registered")
         while True:
             raw = await websocket.receive_text()
             if len(raw.encode("utf-8")) > MAX_MESSAGE_BYTES:
@@ -1038,6 +1157,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
             action = msg.get("action")
             if action == "ping": await websocket.send_json({"action": "pong"})
             elif action == "discover":
+                usage_event("discovery_queries")
                 cap = msg.get("capability")
                 async with state_lock: matches = {k: {"price": v.get("pricing", {}).get(cap, "Negotiable"), "identity_verified": True} for k, v in agent_profiles.items() if cap in v.get("capabilities", []) and k != agent_id and v.get("identity_verified")}
                 await websocket.send_json({"event": "discovery_results", "capability": cap, "matches": matches})
@@ -1075,6 +1195,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
                 try:
                     await seller_ws.send_json({"event": "trade_requested", "trade_id": trade_id, "buyer": agent_id, "item": tx.item_name})
                     await websocket.send_json({"event": "trade_created", "trade_id": trade_id, "status": "pending", "expires_in_seconds": TRADE_TTL_SECONDS, "settlement_verified": False})
+                    usage_event("trades_created")
                 except Exception:
                     async with state_lock: active_trades.pop(trade_id, None)
                     await websocket.send_json({"error": "seller_delivery_failed"})
@@ -1215,6 +1336,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
                     await websocket.send_json({"error":"payment_trade_expired"})
                     continue
                 await websocket.send_json({"event":"trade_settled","trade_id":tid,"result":verdict})
+                usage_event("settlements_verified")
                 if seller_ws:
                     await seller_ws.send_json({"event":"payment_received","trade_id":tid,"result":verdict})
             elif action == "authorize_btc_invoice":
@@ -1275,6 +1397,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
                         trade["status"] = "completed"
                         seller_ws = active_agents.get(trade["seller"])
                 await websocket.send_json({"event": "trade_settled", "trade_id": tid, "result": verdict})
+                usage_event("settlements_verified")
                 if seller_ws:
                     await seller_ws.send_json({"event": "payment_received", "trade_id": tid, "result": verdict})
             elif action == "authorize_eth_invoice":
@@ -1334,6 +1457,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
                         trade["status"] = "completed"
                         seller_ws = active_agents.get(trade["seller"])
                 await websocket.send_json({"event": "trade_settled", "trade_id": tid, "result": verdict})
+                usage_event("settlements_verified")
                 if seller_ws:
                     await seller_ws.send_json({"event": "payment_received", "trade_id": tid, "result": verdict})
     except Exception as exc:
