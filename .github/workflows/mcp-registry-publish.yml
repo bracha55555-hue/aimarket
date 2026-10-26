@@ -1,0 +1,60 @@
+name: Publish AI Market to official MCP Registry
+on:
+  push:
+    branches: [main]
+    paths:
+      - server.json
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install verified MCP publisher
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.5/mcp-publisher_linux_amd64.tar.gz" -o publisher.tar.gz
+          echo "2d151ac57275c9a6684d9d22b1cba81058bab195ea0a162e8fce3c6a5ec32812  publisher.tar.gz" | sha256sum -c -
+          tar -xzf publisher.tar.gz mcp-publisher
+          chmod 755 mcp-publisher
+      - name: Validate MCP registry manifest
+        run: ./mcp-publisher validate server.json
+      - name: Verify read-only remote MCP discovery and tool list
+        run: |
+          python - <<'PY'
+          import json, urllib.request
+          base = "https://aimarket-997u.onrender.com/mcp"
+          meta = {
+              "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+              "io.modelcontextprotocol/clientCapabilities": {}
+          }
+          for method in ("server/discover", "tools/list"):
+              body = json.dumps({"jsonrpc":"2.0", "id":1, "method":method,
+                                "params":{"_meta": meta}}).encode()
+              req = urllib.request.Request(base, data=body, headers={
+                  "Content-Type":"application/json",
+                  "Accept":"application/json, text/event-stream",
+                  "MCP-Protocol-Version":"2026-07-28",
+                  "Mcp-Method":method}, method="POST")
+              with urllib.request.urlopen(req, timeout=90) as resp:
+                  assert resp.status == 200
+                  value = json.load(resp)
+              assert "error" not in value, value
+              if method == "server/discover":
+                  assert "2026-07-28" in value["result"]["supportedVersions"]
+              else:
+                  names = {tool["name"] for tool in value["result"]["tools"]}
+                  assert {"search_agents", "real_buyer_requests", "market_in_one_call"}.issubset(names), names
+          print("Remote MCP protocol smoke tests passed")
+          PY
+      - name: Authenticate with scoped GitHub OIDC (no token secret)
+        run: ./mcp-publisher login github-oidc
+      - name: Publish public read-only marketplace MCP listing
+        run: ./mcp-publisher publish server.json
