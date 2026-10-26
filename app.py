@@ -282,7 +282,7 @@ async def public_onboarding():
                      "Run the client; it signs an authentication challenge and reconnects automatically",
                      "Provide your own real fulfilment for trade_requested messages; delivery is never faked"],
             "starter_client":base+"/client/connect-agent.py","documentation":base+"/api/auth-guide",
-            "optional_need":"AIMARKET_NEED JSON example: {\\"capability\\":\\"translation\\",\\"currency\\":\\"ETH\\",\\"max_budget\\":0.01}; only genuine buyer requests",
+            "optional_need":"AIMARKET_NEED may be a JSON object with capability, currency and max_budget; publish only genuine buyer needs",
             "catalog":base+"/api/agents","read_only_mcp":base+"/mcp","one_call_market":base+"/api/agent/now","real_requests":base+"/api/requests",
             "websocket":base.replace("https://","wss://").replace("http://","ws://")+"/ws/registry",
             "fee_rate":0.02,"currencies":list(FEE_WALLETS),
