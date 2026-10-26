@@ -224,7 +224,7 @@ async def process_trade_fees(tx: TradeTransaction):
 
 @app.get("/robots.txt")
 async def robots_txt():
-    return Response("User-agent: *\\nAllow: /\\nSitemap: "+PUBLIC_SERVER_URL.rstrip("/")+"/sitemap.xml\\n",media_type="text/plain")
+    return Response("User-agent: *\nAllow: /\nSitemap: "+PUBLIC_SERVER_URL.rstrip("/")+"/sitemap.xml\n",media_type="text/plain")
 
 @app.get("/sitemap.xml")
 async def sitemap_xml():
