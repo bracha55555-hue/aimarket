@@ -1,0 +1,135 @@
+name: MCP dual-era compatibility gate
+on:
+  push:
+    branches: [main, compat/dual-era-mcp-and-agent-discovery-20261027]
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install server and official Python MCP SDK
+        run: pip install -r requirements.txt httpx "mcp>=1.21,<2"
+      - name: Compile
+        run: python -m py_compile app.py
+      - name: Verify 2025 and 2026 wire contracts and extra discovery
+        run: |
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          import app
+          with TestClient(app.app) as client:
+              h={"content-type":"application/json","accept":"application/json, text/event-stream"}
+              init={"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"legacy-test","version":"1.0"}}}
+              r=client.post("/mcp",headers=h,json=init)
+              assert r.status_code==200,r.text
+              assert r.json()["result"]["protocolVersion"]=="2025-11-25"
+              assert r.json()["result"]["capabilities"]["tools"]=={"listChanged":False}
+              v={**h,"MCP-Protocol-Version":"2025-11-25"}
+              r=client.post("/mcp",headers=v,json={"jsonrpc":"2.0","method":"notifications/initialized"})
+              assert r.status_code==202 and not r.content,(r.status_code,r.text)
+              r=client.post("/mcp",headers=v,json={"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}})
+              assert r.status_code==200,r.text
+              names={x["name"] for x in r.json()["result"]["tools"]}
+              assert {"search_agents","real_buyer_requests","market_in_one_call"}.issubset(names)
+              r=client.post("/mcp",headers=v,json={"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"market_in_one_call","arguments":{}}})
+              assert r.status_code==200,r.text
+              assert r.json()["result"]["structuredContent"]["browse_without_wallet"]
+              r=client.post("/mcp",headers=v,json={"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"no_such_tool","arguments":{}}})
+              assert r.status_code==400
+              r=client.post("/mcp",headers={**v,"Origin":"https://evil.example"},json=init)
+              assert r.status_code==403
+              assert client.get("/mcp").status_code==405
+              for route in ("/.well-known/agent-card.json","/.well-known/agent.json","/.well-known/ai-catalog.json","/mcp/server-card"):
+                  r=client.get(route)
+                  assert r.status_code==200,(route,r.text)
+                  assert r.json().get("a2aProtocolSupported",False) is False
+              modern={"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}
+              hmodern={**h,"MCP-Protocol-Version":"2026-07-28","Mcp-Method":"server/discover"}
+              r=client.post("/mcp",headers=hmodern,json={"jsonrpc":"2.0","id":5,"method":"server/discover","params":{"_meta":modern}})
+              assert r.status_code==200,r.text
+              assert r.json()["result"]["supportedVersions"]==["2026-07-28"]
+              hmodern["Mcp-Method"]="tools/list"
+              r=client.post("/mcp",headers=hmodern,json={"jsonrpc":"2.0","id":6,"method":"tools/list","params":{"_meta":modern}})
+              assert r.status_code==200,r.text
+              bad=client.post("/mcp",headers={**hmodern,"MCP-Protocol-Version":"bad"},json={"jsonrpc":"2.0","id":7,"method":"tools/list","params":{"_meta":modern}})
+              assert bad.status_code==400
+              assert all(x in app.FEE_WALLETS for x in ("BTC","ETH","SOL","TRX"))
+          print("PASS dual MCP eras, origin validation, honest discovery; no funds moved")
+          PY
+      - name: Connect with official MCP Python client over real Streamable HTTP
+        run: |
+          python - <<'PY'
+          import asyncio, subprocess, sys, time, urllib.request
+          from mcp import ClientSession
+          from mcp.client.streamable_http import streamablehttp_client
+          process=subprocess.Popen([sys.executable,"-m","uvicorn","app:app","--host","127.0.0.1","--port","8917"],
+                                   stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+          async def test():
+              async with streamablehttp_client("http://127.0.0.1:8917/mcp") as (reader,writer,session_id):
+                  async with ClientSession(reader,writer) as session:
+                      init=await session.initialize()
+                      assert init.protocolVersion in ("2025-11-25","2025-06-18","2025-03-26"),init
+                      tools=await session.list_tools()
+                      assert "market_in_one_call" in {t.name for t in tools.tools}
+                      info=await session.call_tool("market_in_one_call",{})
+                      assert not info.isError
+                      print("PASS official MCP SDK initialize/list_tools/call_tool")
+          try:
+              for i in range(90):
+                  if process.poll() is not None:raise RuntimeError("server process died")
+                  try:
+                      urllib.request.urlopen("http://127.0.0.1:8917/health",timeout=1).close()
+                      break
+                  except Exception:time.sleep(0.2)
+              else:raise RuntimeError("server start timeout")
+              asyncio.run(test())
+          finally:
+              process.terminate()
+              try:process.wait(timeout=4)
+              except subprocess.TimeoutExpired:process.kill()
+          PY
+      - name: Verify upgraded remote production from outside Render
+        if: github.ref == 'refs/heads/main'
+        run: |
+          python - <<'PY'
+          import json, time, urllib.request
+          base="https://aimarket-997u.onrender.com"
+          headers={"Content-Type":"application/json","Accept":"application/json, text/event-stream"}
+          init={"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+              "protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"external-smoke","version":"1.0"}}}
+          for attempt in range(24):
+              try:
+                  with urllib.request.urlopen(base+"/.well-known/ai-market.json",timeout=15) as resp:
+                      meta=json.load(resp)
+                  if "2025-11-25" not in meta.get("mcp_legacy_versions",[]):
+                      time.sleep(10)
+                      continue
+                  request=urllib.request.Request(base+"/mcp",data=json.dumps(init).encode(),
+                      headers=headers,method="POST")
+                  with urllib.request.urlopen(request,timeout=15) as resp:
+                      value=json.load(resp)
+                  assert value["result"]["protocolVersion"]=="2025-11-25"
+                  request=urllib.request.Request(base+"/mcp",data=json.dumps({
+                      "jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}).encode(),
+                      headers={**headers,"MCP-Protocol-Version":"2025-11-25"},method="POST")
+                  with urllib.request.urlopen(request,timeout=15) as resp:
+                      listed=json.load(resp)
+                  assert "market_in_one_call" in {tool["name"] for tool in listed["result"]["tools"]}
+                  for path in ("/.well-known/agent-card.json","/.well-known/ai-catalog.json"):
+                      with urllib.request.urlopen(base+path,timeout=15) as resp:
+                          assert resp.status==200 and isinstance(json.load(resp),dict)
+                  print("PASS remote Render accepts real legacy MCP requests and discovery")
+                  break
+              except Exception as exc:
+                  if attempt==23: raise
+                  print("Waiting for tested production release:",type(exc).__name__)
+                  time.sleep(10)
+          else: raise RuntimeError("Production did not deploy the compatibility fix")
+          PY

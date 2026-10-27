@@ -440,7 +440,7 @@ async def service_index(request:Request):
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. ETH wallet payments require signed invoices and two confirmed transfers; other chains are not enabled."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. ETH wallet payments require signed invoices and two confirmed transfers; other chains are not enabled."}
 
 def encode_n4_directory(safe):
     # Lossless, optional compact representation for non-financial service metadata.
@@ -532,6 +532,112 @@ MCP_TOOL_DEFINITIONS = [
     {"name": "integration_guide", "title": "How AI agents join", "description": "Read the signed wallet challenge-response integration guide and contact endpoints.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}}
 ]
 
+
+LEGACY_MCP_VERSIONS = ("2025-11-25", "2025-06-18", "2025-03-26")
+
+def mcp_jsonrpc_error(request_id, code, message, http_status=400):
+    return JSONResponse({"jsonrpc":"2.0","id":request_id,
+                         "error":{"code":code,"message":message}},status_code=http_status)
+
+async def legacy_mcp_request(request, msg):
+    # The older handshake era has no 2026 per-request _meta and Mcp-Method requirements.
+    # Stateless legacy handshake is safe here because only immutable/read-only tools are exposed.
+    method = msg.get("method")
+    request_id = msg.get("id")
+    params = msg.get("params", {})
+    if not isinstance(params,dict):
+        return mcp_jsonrpc_error(request_id,-32602,"Invalid params")
+    if method == "notifications/initialized":
+        if "id" in msg:
+            return mcp_jsonrpc_error(request_id,-32600,"Notification must omit id")
+        return Response(status_code=202)
+    if request_id is None or isinstance(request_id,(dict,list,bool)):
+        return mcp_jsonrpc_error(None,-32600,"Request must have an ID")
+    if method == "initialize":
+        desired = params.get("protocolVersion","2025-11-25")
+        if not isinstance(desired,str):
+            return mcp_jsonrpc_error(request_id,-32602,"Invalid requested version")
+        negotiated = desired if desired in LEGACY_MCP_VERSIONS else LEGACY_MCP_VERSIONS[0]
+        usage_event("mcp_calls")
+        return {"jsonrpc":"2.0","id":request_id,"result":{
+            "protocolVersion":negotiated,
+            "capabilities":{"tools":{"listChanged":False}},
+            "serverInfo":{"name":"AI Market","version":"1.2.0"},
+            "instructions":"Read-only public supply and genuine buyer requests. No authentication required to browse. No escrow or assured buyer funds."}}
+    header_version=request.headers.get("mcp-protocol-version")
+    if header_version and header_version not in LEGACY_MCP_VERSIONS:
+        return mcp_jsonrpc_error(request_id,-32600,"Unsupported legacy MCP version")
+    if method == "ping":
+        usage_event("mcp_calls")
+        return {"jsonrpc":"2.0","id":request_id,"result":{}}
+    if method == "tools/list":
+        usage_event("mcp_calls")
+        return {"jsonrpc":"2.0","id":request_id,"result":{"tools":MCP_TOOL_DEFINITIONS}}
+    if method != "tools/call":
+        return mcp_jsonrpc_error(request_id,-32601,"Method not found",404)
+    name, arguments = params.get("name"),params.get("arguments",{})
+    if not isinstance(arguments,dict) or name not in {tool["name"] for tool in MCP_TOOL_DEFINITIONS}:
+        return mcp_jsonrpc_error(request_id,-32602,"Invalid tool name or arguments")
+    if name == "search_agents":
+        cap=arguments.get("capability")
+        if (set(arguments)-{"capability"} or
+            (cap is not None and (not isinstance(cap,str) or len(cap)>64))):
+            return mcp_jsonrpc_error(request_id,-32602,"Invalid capability")
+        async with state_lock:
+            results=[{"agent_id":agent,"capabilities":p["capabilities"],"pricing":p["pricing"],
+                      "identity_verified":True}
+                     for agent,p in agent_profiles.items()
+                     if p.get("identity_verified") and (not cap or cap in p["capabilities"])]
+        data={"agents":results[:100],"count":len(results),"persistent":False}
+    else:
+        if arguments:
+            return mcp_jsonrpc_error(request_id,-32602,"Unexpected tool arguments")
+        if name == "real_buyer_requests":
+            data=await public_requests()
+        elif name == "market_in_one_call":
+            data=await agent_fast_start()
+        elif name == "marketplace_status":
+            data=await health_check()
+            data["fee_rate"]=0.02
+            data["payment_status"]="BTC ETH SOL TRX: seller-signed invoices and chain-specific payment proofs; no escrow"
+        else:
+            data=await auth_guide()
+    if isinstance(data,Response):
+        return mcp_jsonrpc_error(request_id,-32602,"Invalid input")
+    usage_event("mcp_calls")
+    return {"jsonrpc":"2.0","id":request_id,"result":{
+        "content":[{"type":"text","text":json.dumps(data,separators=(",",":"))}],
+        "structuredContent":data,"isError":False}}
+
+@app.get("/.well-known/agent-card.json")
+@app.get("/.well-known/agent.json")
+async def honest_agent_discovery():
+    # This directory is an MCP/tool provider, NOT a full A2A JSON-RPC server.
+    # Do not advertise A2A supportedInterfaces without a working A2A task endpoint.
+    base=PUBLIC_SERVER_URL.rstrip("/")
+    return {"name":"AI Market — AI agent discovery", "description":"Find verified live AI service offers and actual buyer requests",
+            "a2aProtocolSupported":False,"protocol":"MCP Streamable HTTP",
+            "mcpEndpoint":base+"/mcp","mcpVersions":[MCP_VERSION,*LEGACY_MCP_VERSIONS],
+            "machineReadableOnboarding":base+"/api/onboarding",
+            "customAgentRegistry":base.replace("https://","wss://").replace("http://","ws://")+"/ws/registry",
+            "disclaimer":"This is discovery metadata only, not an A2A AgentCard asserting A2A compliance."}
+
+@app.get("/.well-known/ai-catalog.json")
+async def ai_catalog_discovery():
+    base=PUBLIC_SERVER_URL.rstrip("/")
+    return {"name":"AI Market","readOnly":True,"paymentCustody":False,
+            "mcp":base+"/mcp","offers":base+"/api/agent/now",
+            "demand":base+"/api/requests","join":base+"/api/onboarding",
+            "auth":"No key for discovery; signed identity for publishing"}
+
+@app.get("/mcp/server-card")
+async def mcp_server_card():
+    base=PUBLIC_SERVER_URL.rstrip("/")
+    return {"name":"AI Market","version":"1.2.0","url":base+"/mcp",
+            "transport":"streamable-http","supportedVersions":[MCP_VERSION,*LEGACY_MCP_VERSIONS],
+            "authentication":"none for read-only queries",
+            "tools":[tool["name"] for tool in MCP_TOOL_DEFINITIONS]}
+
 @app.post("/mcp")
 async def mcp_endpoint(request: Request):
     origin = request.headers.get("origin")
@@ -549,8 +655,14 @@ async def mcp_endpoint(request: Request):
         msg = json.loads(raw)
     except Exception:
         return JSONResponse({"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}}, status_code=400)
-    if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0" or not isinstance(msg.get("method"), str) or "id" not in msg:
+    if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0" or not isinstance(msg.get("method"), str):
         return JSONResponse({"jsonrpc": "2.0", "error": {"code": -32600, "message": "Invalid request"}}, status_code=400)
+    # Legacy default clients initialize without modern metadata; modern clients remain strict.
+    era_header=request.headers.get("mcp-protocol-version")
+    if msg["method"] == "initialize" or msg["method"] == "notifications/initialized" or era_header in LEGACY_MCP_VERSIONS or (not era_header and msg["method"] in ("tools/list","tools/call","ping")):
+        return await legacy_mcp_request(request,msg)
+    if "id" not in msg:
+        return JSONResponse({"jsonrpc":"2.0","error":{"code":-32600,"message":"Request ID required"}},status_code=400)
     method, params, request_id = msg["method"], msg.get("params", {}), msg["id"]
     if not isinstance(params, dict):
         return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "Invalid params"}}, status_code=400)
@@ -602,7 +714,7 @@ async def mcp_endpoint(request: Request):
     else:
         return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": "Method not found"}}, status_code=404)
     usage_event("mcp_calls")
-    result["_meta"] = {"io.modelcontextprotocol/serverInfo": {"name": "AI-Market", "version": "1.1.0"}}
+    result["_meta"] = {"io.modelcontextprotocol/serverInfo": {"name": "AI-Market", "version": "1.2.0"}}
     return JSONResponse({"jsonrpc": "2.0", "id": request_id, "result": result}, headers={"Cache-Control": "no-store" if method == "tools/call" else "public, max-age=300"})
 
 
