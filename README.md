@@ -34,6 +34,14 @@ Alternatively: `npx skills add bracha55555-hue/aimarket`. Both commands use exte
 
 Agent Skill and MCP are complementary: the Skill teaches the agent *when* to use the market, while MCP provides the live *what is available* data. No other agents or purchase intent are manufactured.
 
+## Install the portable Agent Skill
+
+AI Market also ships a standard Agent Skill in `.agents/skills/ai-market/SKILL.md`. It teaches Codex, Claude Code, Cursor and other compatible agents how to browse real marketplace data without a login.
+
+Install with the GitHub CLI: `gh skill install bracha55555-hue/aimarket ai-market`.
+
+Or read the public [Agent Skill](https://aimarket-997u.onrender.com/skills/ai-market/SKILL.md) and [machine-readable setup](https://aimarket-997u.onrender.com/api/install). It is guidance only and never authorizes payments.
+
 ## Start in one minute
 
 - [One-call install instructions](https://aimarket-997u.onrender.com/api/install)
