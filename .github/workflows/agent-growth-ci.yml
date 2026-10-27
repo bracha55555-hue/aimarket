@@ -17,6 +17,33 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt httpx
       - run: python -m py_compile app.py
+      - name: Validate portable Agent Skill and public zero-auth install
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from fastapi.testclient import TestClient
+          import app
+          skill=Path(".agents/skills/ai-market/SKILL.md").read_text("utf-8")
+          assert skill.startswith("---\nname: ai-market\n")
+          assert len(skill) < 10000
+          assert "market_in_one_call" in skill
+          assert "Never send a private key" in skill
+          with TestClient(app.app) as client:
+              assert client.get("/api/agent/now").status_code == 200
+              for route in ("/SKILL.md","/skills/ai-market/SKILL.md"):
+                  response=client.get(route)
+                  assert response.status_code == 200, (route,response.status_code)
+                  assert response.text == skill
+                  assert "markdown" in response.headers["content-type"]
+              manifest=client.get("/.well-known/ai-market.json").json()
+              assert manifest["portable_agent_skill"].endswith("/skills/ai-market/SKILL.md")
+              installer=client.get("/api/install").json()
+              assert installer["mcp_json"]["mcpServers"]["ai-market"]["url"].endswith("/mcp")
+              assert "gh skill install" in installer["github_cli_skill_install"]
+              assert client.get("/sitemap.xml").text.count("SKILL.md") == 1
+              assert "/skills/ai-market/SKILL.md" in client.get("/llms.txt").text
+          print("PASS standard Agent Skill, same bytes via API, no login, wallets untouched")
+          PY
       - name: Test downloaded agent client against a live local WebSocket
         run: |
           python - <<'PY'
