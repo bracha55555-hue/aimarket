@@ -550,6 +550,22 @@ async def auth_guide():
         "verified_settlement": False
     }
 
+AGENT_SKILL_URI = "skill://ai-market/SKILL.md"
+
+def mcp_agent_skill_entry():
+    raw = SKILL_PATH.read_bytes()
+    return {"uri":AGENT_SKILL_URI,
+            "frontmatter":{
+                "name":"ai-market",
+                "description":"Discover live AI agents offering real digital services, check genuine buyer requests, or publish real service capabilities to AI Market. Use when an agent needs help delegating a task, finding AI collaborators, selling a verifiable service, or exploring agent-to-agent commerce.",
+                "license":"MIT",
+                "metadata":{"author":"bracha55555-hue",
+                            "website":"https://aimarket-997u.onrender.com"}
+            },
+            "resources":[{"uri":AGENT_SKILL_URI,
+                          "digest":"sha256:"+hashlib.sha256(raw).hexdigest(),
+                          "size":len(raw)}]}
+
 MCP_VERSION = "2026-07-28"
 MCP_TOOL_DEFINITIONS = [
     {"name": "search_agents", "title": "Find verified service providers", "description": "List online identity-verified AI agents offering the requested capability. Read-only; availability is ephemeral and not a promise of service delivery.", "inputSchema": {"type": "object", "properties": {"capability": {"type": "string", "description": "Exact advertised capability name, or omit to see all verified agents"}}, "additionalProperties": False}},
@@ -703,7 +719,31 @@ async def mcp_endpoint(request: Request):
     if request.headers.get("mcp-method") != method:
         return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32020, "message": "Method header mismatch"}}, status_code=400)
     if method == "server/discover":
-        result = {"resultType": "complete", "supportedVersions": [MCP_VERSION], "capabilities": {"tools": {"listChanged": False}}, "instructions": "Search verified online AI agents. This market is read-only via MCP. No payment verification, escrow, or durable trades; never treat an order as paid.", "ttlMs": 300000, "cacheScope": "public"}
+        result = {"resultType": "complete", "supportedVersions": [MCP_VERSION], "capabilities": {"tools": {"listChanged": False}, "resources": {}, "extensions": {"io.modelcontextprotocol/skills": {}}}, "instructions": "Search verified online AI agents. Optional user-approved skill: skill://ai-market/SKILL.md. Discovery is free and read-only; do not assume payments or buyers are funded.", "ttlMs": 300000, "cacheScope": "public"}
+    elif method == "skills/list":
+        if set(params)-{"_meta"}:
+            return mcp_jsonrpc_error(request_id,-32602,"Invalid skill list parameters")
+        result={"resultType":"complete","skills":[mcp_agent_skill_entry()],
+                "ttlMs":300000,"cacheScope":"public"}
+    elif method == "skills/get":
+        if params.get("uri")!=AGENT_SKILL_URI or set(params)-{"uri","_meta"}:
+            return mcp_jsonrpc_error(request_id,-32602,"Unknown skill URI")
+        result={"resultType":"complete","skill":mcp_agent_skill_entry(),
+                "ttlMs":300000,"cacheScope":"public"}
+    elif method == "resources/list":
+        if set(params)-{"_meta"}:
+            return mcp_jsonrpc_error(request_id,-32602,"Invalid resource list parameters")
+        entry=mcp_agent_skill_entry()
+        result={"resultType":"complete","resources":[{"uri":AGENT_SKILL_URI,
+                    "name":"ai-market",
+                    "description":entry["frontmatter"]["description"],
+                    "mimeType":"text/markdown"}],"ttlMs":300000,"cacheScope":"public"}
+    elif method == "resources/read":
+        if params.get("uri")!=AGENT_SKILL_URI or set(params)-{"uri","_meta"}:
+            return mcp_jsonrpc_error(request_id,-32602,"Unknown resource URI")
+        result={"resultType":"complete","contents":[{"uri":AGENT_SKILL_URI,
+                 "mimeType":"text/markdown","text":SKILL_PATH.read_text("utf-8")}],
+                 "ttlMs":300000,"cacheScope":"public"}
     elif method == "tools/list":
         result = {"resultType": "complete", "tools": MCP_TOOL_DEFINITIONS, "ttlMs": 300000, "cacheScope": "public"}
     elif method == "tools/call":
