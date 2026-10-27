@@ -42,6 +42,35 @@ jobs:
               assert "gh skill install" in installer["github_cli_skill_install"]
               assert client.get("/sitemap.xml").text.count("SKILL.md") == 1
               assert "/skills/ai-market/SKILL.md" in client.get("/llms.txt").text
+              import hashlib
+              metadata={"io.modelcontextprotocol/protocolVersion":"2026-07-28",
+                        "io.modelcontextprotocol/clientCapabilities":{}}
+              headers={"content-type":"application/json","accept":"application/json, text/event-stream",
+                       "mcp-protocol-version":"2026-07-28"}
+              def rpc(method,params,id=1):
+                  resp=client.post("/mcp",json={"jsonrpc":"2.0","id":id,"method":method,
+                                  "params":{"_meta":metadata,**params}},
+                                  headers={**headers,"mcp-method":method})
+                  assert resp.status_code==200,(method,resp.status_code,resp.text)
+                  return resp.json()["result"]
+              discover=rpc("server/discover",{})
+              assert "io.modelcontextprotocol/skills" in discover["capabilities"]["extensions"]
+              assert "resources" in discover["capabilities"]
+              listed=rpc("skills/list",{})
+              entry=listed["skills"][0]
+              assert entry["frontmatter"]["name"]=="ai-market"
+              assert entry["uri"]=="skill://ai-market/SKILL.md"
+              resource=entry["resources"][0]
+              assert resource["size"]==len(skill.encode("utf-8"))
+              assert resource["digest"]=="sha256:"+hashlib.sha256(skill.encode("utf-8")).hexdigest()
+              assert rpc("skills/get",{"uri":entry["uri"]})["skill"]==entry
+              assert rpc("resources/read",{"uri":entry["uri"]})["contents"][0]["text"]==skill
+              assert rpc("resources/list",{})["resources"][0]["uri"]==entry["uri"]
+              bad=client.post("/mcp",json={"jsonrpc":"2.0","id":3,"method":"skills/get",
+                         "params":{"_meta":metadata,"uri":"skill://wrong/SKILL.md"}},
+                         headers={**headers,"mcp-method":"skills/get"})
+              assert bad.status_code==400 and bad.json()["error"]["code"]==-32602
+
           print("PASS standard Agent Skill, same bytes via API, no login, wallets untouched")
           PY
       - name: Test downloaded agent client against a live local WebSocket
