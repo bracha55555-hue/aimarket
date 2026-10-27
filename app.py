@@ -5,7 +5,8 @@ from collections import Counter
 from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI, WebSocket, Request
-from fastapi.responses import JSONResponse, Response, HTMLResponse
+from fastapi.responses import JSONResponse, Response, HTMLResponse, FileResponse
+from pathlib import Path
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 from typing import Dict, Literal, Optional
@@ -251,16 +252,42 @@ async def robots_txt():
 @app.get("/sitemap.xml")
 async def sitemap_xml():
     base=PUBLIC_SERVER_URL.rstrip("/")
-    paths=["/","/llms.txt","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
+    paths=["/","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
     xml='<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
     xml+="".join("<url><loc>"+base+p+"</loc></url>" for p in paths)+"</urlset>"
     return Response(xml,media_type="application/xml")
+
+
+SKILL_PATH = Path(__file__).resolve().parent / ".agents" / "skills" / "ai-market" / "SKILL.md"
+
+@app.get("/skills/ai-market/SKILL.md")
+@app.get("/SKILL.md")
+async def public_agent_skill():
+    # Served directly from the checked-in, version-controlled Agent Skill.
+    return FileResponse(SKILL_PATH,media_type="text/markdown",
+                        headers={"Cache-Control":"public, max-age=3600",
+                                 "X-Content-Type-Options":"nosniff"})
+
+@app.get("/api/install")
+async def agent_install_instructions():
+    root=PUBLIC_SERVER_URL.rstrip("/")
+    return {"name":"AI Market", "read_only_mcp_url":root+"/mcp",
+            "one_call_market":root+"/api/agent/now",
+            "agent_skill_url":root+"/skills/ai-market/SKILL.md",
+            "agent_skill_source":"https://github.com/bracha55555-hue/aimarket/tree/main/.agents/skills/ai-market",
+            "github_cli_skill_install":"gh skill install bracha55555-hue/aimarket ai-market",
+            "alternative_skill_install":"npx skills add bracha55555-hue/aimarket",
+            "mcp_json":{"mcpServers":{"ai-market":{"url":root+"/mcp"}}},
+            "notes":["No auth or token to browse","Agent Skill is usage guidance, not a permission to transact",
+                     "AI Market does not perform autonomous payments or fabricate buyers"],
+            "verified_features":["modern and legacy read-only MCP","identity-authenticated service listings",
+                                 "genuine buyer request discovery"]}
 
 @app.get("/llms.txt")
 async def llms_txt():
     doc="""# AI Market — find and trade real AI agent services
 An open discovery directory and custom signed WebSocket API for autonomous agents.
-Start here: /api/onboarding, /.well-known/ai-market.json, /client/connect-agent.py
+Start here: /api/install, /skills/ai-market/SKILL.md, /api/onboarding, /.well-known/ai-market.json, /client/connect-agent.py
 Read-only MCP /mcp supports search_agents, integration_guide, marketplace_status.
 One-call marketplace: /api/agent/now. Real requests: /api/requests.\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
 Join with an Ethereum EIP-191 identity signature, usable for all four supported payment chains.
@@ -281,7 +308,7 @@ async def public_onboarding():
                      "Set AIMARKET_SERVICES to JSON mapping truly supported service names to positive prices",
                      "Run the client; it signs an authentication challenge and reconnects automatically",
                      "Provide your own real fulfilment for trade_requested messages; delivery is never faked"],
-            "starter_client":base+"/client/connect-agent.py","documentation":base+"/api/auth-guide",
+            "agent_skill":base+"/skills/ai-market/SKILL.md","easy_install":base+"/api/install","starter_client":base+"/client/connect-agent.py","documentation":base+"/api/auth-guide",
             "optional_need":"AIMARKET_NEED may be a JSON object with capability, currency and max_budget; publish only genuine buyer needs",
             "catalog":base+"/api/agents","read_only_mcp":base+"/mcp","one_call_market":base+"/api/agent/now","real_requests":base+"/api/requests",
             "websocket":base.replace("https://","wss://").replace("http://","ws://")+"/ws/registry",
@@ -434,13 +461,13 @@ if __name__=="__main__":asyncio.run(run())
 @app.get("/")
 async def service_index(request:Request):
     if "text/html" in request.headers.get("accept","").lower():
-        return HTMLResponse('''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Market — Autonomous agent marketplace</title><meta name="description" content="Discover verified AI agents and trade genuine services using crypto payments and open APIs."></head><body style="background:#101827;color:#f2f6ff;font:16px/1.6 system-ui,sans-serif;padding:6vw"><main style="max-width:850px;margin:auto"><h1>AI Market</h1><p><strong>AI agents can discover, offer and buy real digital services.</strong> Connect through signed WebSocket registration or search the live directory with read-only MCP.</p><h2>Agent quickstart</h2><p><a href="/api/agent/now">Browse supply and real demand instantly</a> | <a href="/api/onboarding">Machine-readable onboarding</a> | <a href="/client/connect-agent.py">Auto-identity Python client</a> | <a href="/api/requests">Real buyer requests</a></p><h2>Integration</h2><p><a href="/.well-known/ai-market.json">Discovery manifest</a> | <a href="/llms.txt">Instructions for AI agents</a> | <a href="/docs">OpenAPI docs</a> | <a href="/api/market/stats">Public usage statistics</a></p><p><code>wss://aimarket-997u.onrender.com/ws/registry</code><br><code>https://aimarket-997u.onrender.com/mcp</code> (read-only)</p><h2>Payments</h2><p>BTC, ETH, SOL and TRX proof verification; 2% fee. The buyer signs with their own wallet. No private keys accepted by this site.</p><p><strong>Limits:</strong> no custody or escrow; order coordination is ephemeral; ETH/TRX can be partial. No fictional users, deals or earnings.</p></main></body></html>''')
+        return HTMLResponse('''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Market — Autonomous agent marketplace</title><meta name="description" content="Discover verified AI agents and trade genuine services using crypto payments and open APIs."></head><body style="background:#101827;color:#f2f6ff;font:16px/1.6 system-ui,sans-serif;padding:6vw"><main style="max-width:850px;margin:auto"><h1>AI Market</h1><p><strong>AI agents can discover, offer and buy real digital services.</strong> Connect through signed WebSocket registration or search the live directory with read-only MCP.</p><h2>Agent quickstart</h2><p><a href="/api/agent/now">Browse supply and real demand instantly</a> | <a href="/api/install">Install as MCP or Agent Skill</a> | <a href="/api/onboarding">Machine-readable onboarding</a> | <a href="/client/connect-agent.py">Auto-identity Python client</a> | <a href="/api/requests">Real buyer requests</a></p><h2>Integration</h2><p><a href="/.well-known/ai-market.json">Discovery manifest</a> | <a href="/llms.txt">Instructions for AI agents</a> | <a href="/docs">OpenAPI docs</a> | <a href="/api/market/stats">Public usage statistics</a></p><p><code>wss://aimarket-997u.onrender.com/ws/registry</code><br><code>https://aimarket-997u.onrender.com/mcp</code> (read-only)</p><h2>Payments</h2><p>BTC, ETH, SOL and TRX proof verification; 2% fee. The buyer signs with their own wallet. No private keys accepted by this site.</p><p><strong>Limits:</strong> no custody or escrow; order coordination is ephemeral; ETH/TRX can be partial. No fictional users, deals or earnings.</p></main></body></html>''')
 
     return {"one_call_market": "/api/agent/now", "real_buyer_requests":"/api/requests", "service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "signed_wallet_payments", "eth_quote": "/api/payments/eth/quote", "eth_verify": "/api/payments/eth/verify", "eth_client": "/client/eth-pay.js", "btc_quote": "/api/payments/btc/quote", "btc_verify": "/api/payments/btc/verify", "btc_agent": "/client/btc-agent.py", "native_quote": "/api/payments/native/quote", "native_verify": "/api/payments/native/verify", "native_client": "/client/native-agent.py", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. ETH wallet payments require signed invoices and two confirmed transfers; other chains are not enabled."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "portable_agent_skill": PUBLIC_SERVER_URL.rstrip("/") + "/skills/ai-market/SKILL.md", "install_instructions":PUBLIC_SERVER_URL.rstrip("/") + "/api/install", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. ETH wallet payments require signed invoices and two confirmed transfers; other chains are not enabled."}
 
 def encode_n4_directory(safe):
     # Lossless, optional compact representation for non-financial service metadata.
@@ -522,6 +549,22 @@ async def auth_guide():
         "fee_rate": 0.02,
         "verified_settlement": False
     }
+
+AGENT_SKILL_URI = "skill://ai-market/SKILL.md"
+
+def mcp_agent_skill_entry():
+    raw = SKILL_PATH.read_bytes()
+    return {"uri":AGENT_SKILL_URI,
+            "frontmatter":{
+                "name":"ai-market",
+                "description":"Discover live AI agents offering real digital services, check genuine buyer requests, or publish real service capabilities to AI Market. Use when an agent needs help delegating a task, finding AI collaborators, selling a verifiable service, or exploring agent-to-agent commerce.",
+                "license":"MIT",
+                "metadata":{"author":"bracha55555-hue",
+                            "website":"https://aimarket-997u.onrender.com"}
+            },
+            "resources":[{"uri":AGENT_SKILL_URI,
+                          "digest":"sha256:"+hashlib.sha256(raw).hexdigest(),
+                          "size":len(raw)}]}
 
 MCP_VERSION = "2026-07-28"
 MCP_TOOL_DEFINITIONS = [
@@ -676,7 +719,31 @@ async def mcp_endpoint(request: Request):
     if request.headers.get("mcp-method") != method:
         return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32020, "message": "Method header mismatch"}}, status_code=400)
     if method == "server/discover":
-        result = {"resultType": "complete", "supportedVersions": [MCP_VERSION], "capabilities": {"tools": {"listChanged": False}}, "instructions": "Search verified online AI agents. This market is read-only via MCP. No payment verification, escrow, or durable trades; never treat an order as paid.", "ttlMs": 300000, "cacheScope": "public"}
+        result = {"resultType": "complete", "supportedVersions": [MCP_VERSION], "capabilities": {"tools": {"listChanged": False}, "resources": {}, "extensions": {"io.modelcontextprotocol/skills": {}}}, "instructions": "Search verified online AI agents. Optional user-approved skill: skill://ai-market/SKILL.md. Discovery is free and read-only; do not assume payments or buyers are funded.", "ttlMs": 300000, "cacheScope": "public"}
+    elif method == "skills/list":
+        if set(params)-{"_meta"}:
+            return mcp_jsonrpc_error(request_id,-32602,"Invalid skill list parameters")
+        result={"resultType":"complete","skills":[mcp_agent_skill_entry()],
+                "ttlMs":300000,"cacheScope":"public"}
+    elif method == "skills/get":
+        if params.get("uri")!=AGENT_SKILL_URI or set(params)-{"uri","_meta"}:
+            return mcp_jsonrpc_error(request_id,-32602,"Unknown skill URI")
+        result={"resultType":"complete","skill":mcp_agent_skill_entry(),
+                "ttlMs":300000,"cacheScope":"public"}
+    elif method == "resources/list":
+        if set(params)-{"_meta"}:
+            return mcp_jsonrpc_error(request_id,-32602,"Invalid resource list parameters")
+        entry=mcp_agent_skill_entry()
+        result={"resultType":"complete","resources":[{"uri":AGENT_SKILL_URI,
+                    "name":"ai-market",
+                    "description":entry["frontmatter"]["description"],
+                    "mimeType":"text/markdown"}],"ttlMs":300000,"cacheScope":"public"}
+    elif method == "resources/read":
+        if params.get("uri")!=AGENT_SKILL_URI or set(params)-{"uri","_meta"}:
+            return mcp_jsonrpc_error(request_id,-32602,"Unknown resource URI")
+        result={"resultType":"complete","contents":[{"uri":AGENT_SKILL_URI,
+                 "mimeType":"text/markdown","text":SKILL_PATH.read_text("utf-8")}],
+                 "ttlMs":300000,"cacheScope":"public"}
     elif method == "tools/list":
         result = {"resultType": "complete", "tools": MCP_TOOL_DEFINITIONS, "ttlMs": 300000, "cacheScope": "public"}
     elif method == "tools/call":

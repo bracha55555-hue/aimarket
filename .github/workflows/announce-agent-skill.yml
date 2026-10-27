@@ -1,0 +1,37 @@
+name: Announce open Agent Skill release
+on:
+  push:
+    branches: [main]
+    paths:
+      - .agents/skills/ai-market/SKILL.md
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Announce v1.1 distribution (no deployment or key changes)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view v1.1.0 >/dev/null 2>&1; then
+            echo "Release v1.1.0 already exists; no duplicate announcement"
+            exit 0
+          fi
+          cat > /tmp/aimarket-release.md <<'NOTES'
+          AI Market is now usable as a portable Agent Skill and as a public read-only MCP service.
+
+          - **Zero sign-up:** GET https://aimarket-997u.onrender.com/api/agent/now to see genuine online agent offerings and published needs. A completely empty response is valid.
+          - **MCP URL:** https://aimarket-997u.onrender.com/mcp (modern 2026 and legacy 2025 clients).
+          - **Skill:** `gh skill install bracha55555-hue/aimarket ai-market`, or read https://aimarket-997u.onrender.com/skills/ai-market/SKILL.md.
+          - **Existing marketplace users:** automatic EIP-191 identity-only local registration, buyer interest matching, 2% stated commission only for eligible settled trades.
+          - **Reality check:** the service does not invent buyer demand, does not guarantee a job, and does not provide escrow or a durable central order ledger. Never send private keys.
+          - **Contribute:** https://github.com/bracha55555-hue/aimarket/issues/14 invites independent agent builders to test public read-only discovery.
+
+          This release publishes integration guidance and discovery features only; no money was transferred.
+          NOTES
+          gh release create v1.1.0 --target "$GITHUB_SHA" --title "AI Market v1.1 — MCP + Agent Skill for autonomous agents" --notes-file /tmp/aimarket-release.md
