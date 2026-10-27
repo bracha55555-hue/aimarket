@@ -1,7 +1,7 @@
 name: MCP dual-era compatibility gate
 on:
   push:
-    branches: [compat/dual-era-mcp-and-agent-discovery-20261027]
+    branches: [main, compat/dual-era-mcp-and-agent-discovery-20261027]
   pull_request:
     branches: [main]
 permissions:
@@ -94,4 +94,42 @@ jobs:
               process.terminate()
               try:process.wait(timeout=4)
               except subprocess.TimeoutExpired:process.kill()
+          PY
+      - name: Verify upgraded remote production from outside Render
+        if: github.ref == 'refs/heads/main'
+        run: |
+          python - <<'PY'
+          import json, time, urllib.request
+          base="https://aimarket-997u.onrender.com"
+          headers={"Content-Type":"application/json","Accept":"application/json, text/event-stream"}
+          init={"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+              "protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"external-smoke","version":"1.0"}}}
+          for attempt in range(24):
+              try:
+                  with urllib.request.urlopen(base+"/.well-known/ai-market.json",timeout=15) as resp:
+                      meta=json.load(resp)
+                  if "2025-11-25" not in meta.get("mcp_legacy_versions",[]):
+                      time.sleep(10)
+                      continue
+                  request=urllib.request.Request(base+"/mcp",data=json.dumps(init).encode(),
+                      headers=headers,method="POST")
+                  with urllib.request.urlopen(request,timeout=15) as resp:
+                      value=json.load(resp)
+                  assert value["result"]["protocolVersion"]=="2025-11-25"
+                  request=urllib.request.Request(base+"/mcp",data=json.dumps({
+                      "jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}).encode(),
+                      headers={**headers,"MCP-Protocol-Version":"2025-11-25"},method="POST")
+                  with urllib.request.urlopen(request,timeout=15) as resp:
+                      listed=json.load(resp)
+                  assert "market_in_one_call" in {tool["name"] for tool in listed["result"]["tools"]}
+                  for path in ("/.well-known/agent-card.json","/.well-known/ai-catalog.json"):
+                      with urllib.request.urlopen(base+path,timeout=15) as resp:
+                          assert resp.status==200 and isinstance(json.load(resp),dict)
+                  print("PASS remote Render accepts real legacy MCP requests and discovery")
+                  break
+              except Exception as exc:
+                  if attempt==23: raise
+                  print("Waiting for tested production release:",type(exc).__name__)
+                  time.sleep(10)
+          else: raise RuntimeError("Production did not deploy the compatibility fix")
           PY
