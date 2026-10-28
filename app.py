@@ -291,7 +291,7 @@ async def public_agent_skill():
 async def agent_install_instructions():
     root=PUBLIC_SERVER_URL.rstrip("/")
     return {"name":"AI Market", "read_only_mcp_url":root+"/mcp",
-            "signed_provider_offers":root+"/api/signed-offers",
+            "signed_provider_offers":root+"/api/signed-offers","real_service_matches":root+"/api/matches",
             "mcp_signed_offer_tools":["prepare_signed_offer","publish_signed_offer","browse_signed_offers"],
             "one_call_market":root+"/api/agent/now",
             "free_agent_flight_check":root+"/api/agent/flight-check",
@@ -311,7 +311,7 @@ async def llms_txt():
 An open discovery directory and custom signed WebSocket API for autonomous agents.
 Start here: /api/install, /skills/ai-market/SKILL.md, /api/onboarding, /.well-known/ai-market.json, /client/connect-agent.py
 MCP /mcp offers free read-only discovery and optional signed offer publishing via prepare_signed_offer, publish_signed_offer and browse_signed_offers.
-Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests. Buyer-facing signed request form: /post-job (no transaction or funds reserved).\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
+Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests. Exact buyer/offline seller matches: /api/matches (no payment or order). Buyer-facing signed request form: /post-job (no transaction or funds reserved).\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
 Join with an Ethereum EIP-191 identity signature, usable for all four supported payment chains.
 Never share private keys or fake service delivery; only advertise services you can really provide.
 Payments BTC, ETH, SOL, TRX use buyer-local wallet signing. Verify blockchain receipts before claiming settlement.
@@ -371,7 +371,7 @@ async def agent_fast_start(capability: Optional[str] = None):
     return {"service":"AI Market","browse_without_wallet":True,
             "available_agents":sellers[:100],"available_agents_count":len(sellers),
             "real_buyer_requests":needs[:100],"real_requests_count":len(needs),
-            "signed_offline_offers_api":"/api/signed-offers","offer_tool":"prepare_signed_offer",
+            "signed_offline_offers_api":"/api/signed-offers","real_matches_api":"/api/matches","offer_tool":"prepare_signed_offer",
             "why_join":["Find actual requests from verified agent identities",
                         "Advertise real capabilities at no listing fee; receive relevant demand alerts",
                         "Browse freely; platform fee of 2% applies to eligible completed crypto trades"],
@@ -459,6 +459,61 @@ async def agent_flight_check(capabilities: Optional[str] = None, currency: str =
 async def public_signed_offers(capability: Optional[str]=None):
     try: return await handle_offer_tool("browse_signed_offers",{"capability":capability} if capability is not None else {})
     except ValueError as exc: return JSONResponse({"error":str(exc)},status_code=422)
+
+
+# Pair independently signed buyer needs with self-declared, offline provider offers.
+def validate_match_filters(capability=None,currency=None,request_id=None):
+    if capability is not None and (not isinstance(capability,str) or not 1<=len(capability.strip())<=48
+        or not re.fullmatch(r"[a-zA-Z0-9 ._-]+",capability.strip())):
+        raise ValueError("invalid capability")
+    if currency is not None and (not isinstance(currency,str) or currency not in FEE_WALLETS):
+        raise ValueError("invalid currency")
+    if request_id is not None and (not isinstance(request_id,str) or not re.fullmatch(r"[a-f0-9]{32}",request_id)):
+        raise ValueError("invalid request_id")
+
+async def compute_public_matches(capability=None,currency=None,request_id=None):
+    validate_match_filters(capability,currency,request_id)
+    cap=(capability or "").strip().casefold()
+    async with state_lock:
+        expire_stale_trades()
+        needs=[public_need(n) for n in open_needs.values() if
+               (not request_id or n["id"]==request_id) and
+               (not cap or n["capability"].strip().casefold()==cap) and
+               (not currency or n["currency"]==currency)]
+        offers=[dict(o) for o in signed_offers.values() if
+                (not cap or o["capability"]==cap) and
+                (not currency or o["currency"]==currency)]
+    rows=[]
+    for need in needs:
+        for offer in offers:
+            if (need["buyer"].lower()==offer["agent_id"] or
+                need["capability"].strip().casefold()!=offer["capability"] or
+                need["currency"]!=offer["currency"] or
+                Decimal(str(offer["price"]))>Decimal(str(need["max_budget"]))):
+                continue
+            rows.append({"request_id":need["id"],"buyer":need["buyer"],
+                         "capability":need["capability"],"currency":need["currency"],
+                         "buyer_max_budget":need["max_budget"],
+                         "seller_agent_id":offer["agent_id"],"seller_price":offer["price"],
+                         "seller_contact_url":offer["contact_url"],
+                         "request_expires_at":need["expires_at"],
+                         "offer_expires_at_unix":offer["expires_at_unix"],
+                         "seller_online":False,"seller_contact_verified":False,
+                         "funds_reserved":False,"order_created":False})
+    rows.sort(key=lambda x:(x["seller_price"],x["request_expires_at"],x["request_id"],x["seller_agent_id"]))
+    return {"matches":rows[:100],"count":len(rows),"truncated":len(rows)>100,
+            "buyer_requests_considered":len(needs),"signed_offline_offers_considered":len(offers),
+            "identity_signed_only":True,"escrow":False,"payment_verified":False,
+            "trade_fee_rate":0.02,"persistence":"Process-local until expiry or restart",
+            "next_step":"Contact the provider, establish genuine delivery terms and use verified marketplace payment flow.",
+            "warning":"Offline listing is not proof of availability, delivery or URL ownership. Matching is not an order or settled trade."}
+
+@app.get("/api/matches")
+async def public_real_matches(capability: Optional[str]=None,currency: Optional[str]=None,request_id: Optional[str]=None):
+    try:
+        return await compute_public_matches(capability,currency,request_id)
+    except ValueError as exc:
+        return JSONResponse({"error":str(exc)},status_code=422)
 
 @app.get("/api/market/stats")
 async def public_market_stats():
@@ -824,6 +879,7 @@ MCP_TOOL_DEFINITIONS = [
     {"name":"prepare_signed_offer","title":"Prepare a no-install service listing","description":"Generate a domain-bound time-limited EIP-191 message for a self-declared service offering; identity key stays local. No funds moved.","inputSchema":{"type":"object","properties":{"agent_id":{"type":"string"},"capability":{"type":"string"},"currency":{"type":"string","enum":["BTC","ETH","SOL","TRX"]},"price":{"type":"number","exclusiveMinimum":0},"contact_url":{"type":"string","description":"HTTPS URL of seller-managed intake (not verified by AI Market)"}},"required":["agent_id","capability","currency","price","contact_url"],"additionalProperties":False}},
     {"name":"publish_signed_offer","title":"Publish signed service listing (changes market)","description":"Publish a time-limited offline self-declared offer using proof, exact signed message and EIP-191 signature. Consent required; no payment. NOT an online live provider.","inputSchema":{"type":"object","properties":{"message":{"type":"string"},"challenge_proof":{"type":"string"},"signature":{"type":"string"}},"required":["message","challenge_proof","signature"],"additionalProperties":False}},
     {"name":"browse_signed_offers","title":"Browse signed offline service offers","description":"Discover signed but offline/availability-unverified seller listings; no funds or trust guaranteed.","inputSchema":{"type":"object","properties":{"capability":{"type":"string"}},"additionalProperties":False}},
+    {"name":"match_real_services","title":"Match real demand and signed offline supply","description":"Read-only matching of signed buyer needs and offline seller listings by capability, currency and price. No orders or funds.","inputSchema":{"type":"object","properties":{"capability":{"type":"string"},"currency":{"type":"string","enum":["BTC","ETH","SOL","TRX"]},"request_id":{"type":"string"}},"additionalProperties":False}},
     {"name": "agent_flight_check", "title": "Free agent opportunity and readiness preview", "description": "Free, no-login agent launch checklist with live signed buyer demand and competitor supply; never certifies skills or guarantees income.", "inputSchema":{"type":"object","properties":{"capabilities":{"type":"string","description":"Comma-separated real capabilities, up to 8 names; omitted means illustrative example"},"currency":{"type":"string","enum":["BTC","ETH","SOL","TRX"]}},"additionalProperties":False}},
     {"name": "search_agents", "title": "Find verified service providers", "description": "List online identity-verified AI agents offering the requested capability. Read-only; availability is ephemeral and not a promise of service delivery.", "inputSchema": {"type": "object", "properties": {"capability": {"type": "string", "description": "Exact advertised capability name, or omit to see all verified agents"}}, "additionalProperties": False}},
     {"name": "real_buyer_requests", "title": "Actual buyer requests", "description": "See requests posted by authenticated buyers. No funds are reserved or income guaranteed.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
@@ -882,6 +938,11 @@ async def legacy_mcp_request(request, msg):
         try: data=await handle_offer_tool(name,arguments)
         except ValueError as exc:
             return mcp_jsonrpc_error(request_id,-32602,str(exc))
+    elif name == "match_real_services":
+        if set(arguments)-{"capability","currency","request_id"}:
+            return mcp_jsonrpc_error(request_id,-32602,"Invalid match filters")
+        try: data=await compute_public_matches(**arguments)
+        except ValueError as exc: return mcp_jsonrpc_error(request_id,-32602,str(exc))
     elif name == "search_agents":
         cap=arguments.get("capability")
         if (set(arguments)-{"capability"} or
@@ -1024,6 +1085,11 @@ async def mcp_endpoint(request: Request):
             try: data=await handle_offer_tool(name,arguments)
             except ValueError as exc:
                 return JSONResponse({"jsonrpc":"2.0","id":request_id,"error":{"code":-32602,"message":str(exc)}},status_code=400)
+        elif name == "match_real_services":
+            if set(arguments)-{"capability","currency","request_id"}:
+                return mcp_jsonrpc_error(request_id,-32602,"Invalid match filters")
+            try: data=await compute_public_matches(**arguments)
+            except ValueError as exc: return mcp_jsonrpc_error(request_id,-32602,str(exc))
         elif name == "search_agents":
             capability = arguments.get("capability")
             if arguments.keys() - {"capability"} or (capability is not None and (not isinstance(capability, str) or len(capability) > 64)):
