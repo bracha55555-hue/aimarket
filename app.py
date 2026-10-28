@@ -1,5 +1,6 @@
 import os, asyncio, urllib.request, json, uuid, math, logging, base64, time, hashlib, html, hmac, secrets, re
 from urllib.parse import urlsplit
+import ipaddress
 from datetime import datetime, timezone
 from decimal import Decimal
 from collections import Counter
@@ -731,6 +732,11 @@ def validated_offer_fields(agent_id, capability, currency, price, contact_url):
     try:
         u=urlsplit(contact_url)
         hostname=u.hostname or ""
+        try:
+            ipaddress.ip_address(hostname)
+            raise ValueError("IP hostnames are not accepted")
+        except ValueError as ip_check:
+            if str(ip_check)=="IP hostnames are not accepted": raise
         valid_url=(u.scheme=="https" and bool(hostname) and "." in hostname
                    and bool(re.fullmatch(r"[a-zA-Z0-9.-]+",hostname))
                    and not any(p.startswith("-") or p.endswith("-") or not p
