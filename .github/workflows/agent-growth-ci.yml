@@ -17,6 +17,48 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt httpx
       - run: python -m py_compile app.py
+      - name: Audit counts-only conversion logging and read current production baseline
+        run: |
+          python - <<'PY'
+          import io, logging, json, urllib.request
+          import app
+          assert app.logger.getEffectiveLevel()==logging.INFO
+          assert app.logger.handlers and app.logger.propagate is False
+          capture=io.StringIO()
+          handler=app.logger.handlers[0]
+          previous=handler.stream
+          try:
+              handler.stream=capture
+              app.usage_event("flight_checks")
+          finally:
+              handler.stream=previous
+          assert "AIMARKET_USAGE type=flight_checks count=" in capture.getvalue()
+          print("PASS conversion events are emitted without identities or keys")
+          root="https://aimarket-997u.onrender.com"
+          for route in ("/api/market/stats","/api/requests","/health"):
+              try:
+                  req=urllib.request.Request(root+route,headers={"User-Agent":"AI-Market-Own-Audit/1.0"})
+                  with urllib.request.urlopen(req,timeout=18) as response:
+                      data=json.load(response)
+                  if route=="/api/market/stats":
+                      print("AUDIT_PRODUCTION_STATISTICS",json.dumps({
+                          "scope":data.get("scope"),
+                          "started":data.get("since"),
+                          "connected_agents":data.get("authenticated_online_agents"),
+                          "available_offers":data.get("available_service_offers"),
+                          "open_requests":data.get("open_verified_buyer_requests"),
+                          "pending_orders":data.get("unsettled_orders_in_memory"),
+                          "events":data.get("events_since_start")},sort_keys=True))
+                  elif route=="/api/requests":
+                      print("AUDIT_PRODUCTION_BUYER_REQUEST_COUNT",data.get("count"),"funds_reserved",data.get("funds_reserved"))
+                  else:
+                      print("AUDIT_PRODUCTION_HEALTH",json.dumps({
+                          "status":data.get("status"),"agents":data.get("connected_agents"),
+                          "active_trades":data.get("active_trades"),"durable_trades":data.get("durable_trades")},
+                          sort_keys=True))
+              except Exception as exc:
+                  print("AUDIT_PRODUCTION_SNAPSHOT_UNAVAILABLE",route,type(exc).__name__)
+          PY
       - name: Validate independent MCP well-known proof is factual and read-only
         run: |
           python - <<'PY'
