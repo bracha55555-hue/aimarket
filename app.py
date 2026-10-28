@@ -46,6 +46,13 @@ MAX_TRADES = 1000
 TRADE_TTL_SECONDS = 3600
 MAX_MESSAGE_BYTES = 16384
 logger = logging.getLogger('aimarket')
+# Reliable conversion event audit on Render stdout/stderr. No IPs, addresses, payloads or keys.
+logger.setLevel(logging.INFO)
+if not logger.handlers:
+    _usage_handler = logging.StreamHandler()
+    _usage_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s %(message)s"))
+    logger.addHandler(_usage_handler)
+logger.propagate = False
 usage_started_at = datetime.now(timezone.utc).isoformat()
 usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0, "buyer_studio_views":0}
 def usage_event(kind):
