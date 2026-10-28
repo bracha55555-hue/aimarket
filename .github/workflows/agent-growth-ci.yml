@@ -17,6 +17,64 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt httpx
       - run: python -m py_compile app.py
+      - name: Verify signed MCP seller offer without WebSocket or server-side keys
+        run: |
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          from eth_account import Account
+          from eth_account.messages import encode_defunct
+          import app as m
+          with TestClient(m.app) as c:
+              seller=Account.create()
+              old={"accept":"application/json, text/event-stream","content-type":"application/json",
+                   "mcp-protocol-version":"2025-11-25"}
+              def legacy(name,args):
+                  return c.post("/mcp",headers=old,json={"jsonrpc":"2.0","method":"tools/call","id":9,
+                      "params":{"name":name,"arguments":args}})
+              input_data={"agent_id":seller.address,"capability":"translation","currency":"SOL","price":0.015,
+                          "contact_url":"https://provider.example/contact"}
+              assert c.get("/api/signed-offers").json()["count"]==0
+              assert legacy("prepare_signed_offer",{**input_data,"contact_url":"http://localhost:8080"}).status_code==400
+              assert legacy("prepare_signed_offer",{**input_data,"contact_url":"https://127.0.0.1/"}).status_code==400
+              assert legacy("prepare_signed_offer",{**input_data,"price":-1}).status_code==400
+              prep=legacy("prepare_signed_offer",input_data)
+              assert prep.status_code==200,prep.text
+              challenge=prep.json()["result"]["structuredContent"]
+              message=challenge["sign_this_message_exactly"]
+              assert seller.address.lower() in message
+              sig=Account.sign_message(encode_defunct(text=message),seller.key).signature.hex()
+              args={"message":message,"challenge_proof":challenge["challenge_proof"],"signature":sig}
+              # Valid signature from the wrong identity must fail.
+              wrong=Account.sign_message(encode_defunct(text=message),Account.create().key).signature.hex()
+              assert legacy("publish_signed_offer",{**args,"signature":wrong}).status_code==400
+              assert legacy("publish_signed_offer",{**args,"message":message.replace("0.015","0.016")}).status_code==400
+              assert c.get("/api/signed-offers").json()["count"]==0
+              # New and old MCP wire protocol both work; one creates, other reads.
+              meta={"io.modelcontextprotocol/protocolVersion":"2026-07-28",
+                    "io.modelcontextprotocol/clientCapabilities":{}}
+              headers={**old,"mcp-protocol-version":"2026-07-28","mcp-method":"tools/call",
+                       "mcp-name":"publish_signed_offer"}
+              posted=c.post("/mcp",headers=headers,json={"jsonrpc":"2.0","method":"tools/call","id":10,
+                  "params":{"_meta":meta,"name":"publish_signed_offer","arguments":args}})
+              assert posted.status_code==200,posted.text
+              result=posted.json()["result"]["structuredContent"]
+              assert result["published"] is True
+              assert result["online"] is False and result["can_accept_marketplace_orders"] is False
+              assert result["contact_url_verified"] is False
+              listing=c.get("/api/signed-offers").json()
+              assert listing["count"]==1 and listing["signed_offline_offers"][0]["agent_id"]==seller.address.lower()
+              assert c.get("/api/agents").json()["count"]==0  # never impersonate live providers
+              assert legacy("publish_signed_offer",args).status_code==400  # replay
+              assert legacy("browse_signed_offers",{"capability":"unrelated"}).json()["result"]["structuredContent"]["count"]==0
+              # Simulate expiry without waiting 12h
+              m.signed_offers[seller.address.lower()]["expires_at_unix"]=0
+              m.expire_stale_trades()
+              assert c.get("/api/signed-offers").json()["count"]==0
+              assert c.get("/api/market/stats").json()["events_since_start"]["signed_offers_published"]==1
+              assert c.get("/api/market/stats").json()["events_since_start"]["settlements_verified"]==0
+              assert all(k in m.FEE_WALLETS for k in ("BTC","ETH","SOL","TRX"))
+          print("PASS: two MCP wire eras, bound EIP-191 signing, replay resistance, expiry, no false online claim")
+          PY
       - name: Audit counts-only conversion logging and read current production baseline
         run: |
           python - <<'PY'
