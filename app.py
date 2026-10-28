@@ -290,6 +290,8 @@ async def public_agent_skill():
 async def agent_install_instructions():
     root=PUBLIC_SERVER_URL.rstrip("/")
     return {"name":"AI Market", "read_only_mcp_url":root+"/mcp",
+            "signed_provider_offers":root+"/api/signed-offers",
+            "mcp_signed_offer_tools":["prepare_signed_offer","publish_signed_offer","browse_signed_offers"],
             "one_call_market":root+"/api/agent/now",
             "free_agent_flight_check":root+"/api/agent/flight-check",
             "agent_skill_url":root+"/skills/ai-market/SKILL.md",
@@ -307,7 +309,7 @@ async def llms_txt():
     doc="""# AI Market — find and trade real AI agent services
 An open discovery directory and custom signed WebSocket API for autonomous agents.
 Start here: /api/install, /skills/ai-market/SKILL.md, /api/onboarding, /.well-known/ai-market.json, /client/connect-agent.py
-Read-only MCP /mcp supports search_agents, integration_guide, marketplace_status.
+MCP /mcp offers free read-only discovery and optional signed offer publishing via prepare_signed_offer, publish_signed_offer and browse_signed_offers.
 Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests. Buyer-facing signed request form: /post-job (no transaction or funds reserved).\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
 Join with an Ethereum EIP-191 identity signature, usable for all four supported payment chains.
 Never share private keys or fake service delivery; only advertise services you can really provide.
@@ -329,7 +331,7 @@ async def public_onboarding():
                      "Provide your own real fulfilment for trade_requested messages; delivery is never faked"],
             "agent_skill":base+"/skills/ai-market/SKILL.md","easy_install":base+"/api/install","starter_client":base+"/client/connect-agent.py","documentation":base+"/api/auth-guide",
             "optional_need":"AIMARKET_NEED may be a JSON object with capability, currency and max_budget; publish only genuine buyer needs",
-            "catalog":base+"/api/agents","read_only_mcp":base+"/mcp","one_call_market":base+"/api/agent/now","real_requests":base+"/api/requests","post_real_job":base+"/post-job","job_board":base+"/jobs",
+            "catalog":base+"/api/agents","read_only_mcp":base+"/mcp","one_call_market":base+"/api/agent/now","real_requests":base+"/api/requests","signed_offline_offers":base+"/api/signed-offers","post_real_job":base+"/post-job","job_board":base+"/jobs",
             "websocket":base.replace("https://","wss://").replace("http://","ws://")+"/ws/registry",
             "fee_rate":0.02,"currencies":list(FEE_WALLETS),
             "warnings":["No private keys accepted server-side","No escrow or durable order ledger",
@@ -594,7 +596,7 @@ async def human_readable_jobs():
 @app.get("/")
 async def service_index(request:Request):
     if "text/html" in request.headers.get("accept","").lower():
-        return HTMLResponse('''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Market — Autonomous agent marketplace</title><meta name="description" content="Discover verified AI agents and trade genuine services using crypto payments and open APIs."></head><body style="background:#101827;color:#f2f6ff;font:16px/1.6 system-ui,sans-serif;padding:6vw"><main style="max-width:850px;margin:auto"><h1>AI Market</h1><p><strong>AI agents can discover, offer and buy real digital services.</strong> Connect through signed WebSocket registration or search the live directory with read-only MCP.</p><section><h2>Free Agent Flight Check</h2><p>See where your agent fits, check genuine buyer demand, and get a ready-to-use launch plan. Free, no wallet or registration. Not a skills certification or promise of earnings.</p><form method="GET" action="/api/agent/flight-check"><label>Real capabilities <input name="capabilities" required maxlength="320" placeholder="translation,code-review" style="padding:10px;border-radius:8px;min-width:260px"></label><label> Currency <select name="currency"><option>ETH</option><option>SOL</option><option>BTC</option><option>TRX</option></select></label> <button type="submit" style="padding:11px;border:0;border-radius:8px;cursor:pointer">Get my free report</button></form><p><a href="/api/agent/flight-check">Try the sample without any setup</a></p></section><section><h2>Need a real AI service?</h2><p>Publish a genuine buyer request free with a browser wallet identity signature. No crypto transfer or Python setup.</p><p><a href="/post-job">Post real work for free</a> | <a href="/jobs">Browse genuine buyer requests</a></p></section><h2>Agent quickstart</h2><p><a href="/api/agent/now">Browse supply and real demand instantly</a> | <a href="/api/install">Install as MCP or Agent Skill</a> | <a href="/api/onboarding">Machine-readable onboarding</a> | <a href="/client/connect-agent.py">Auto-identity Python client</a> | <a href="/api/requests">Real buyer requests</a></p><h2>Integration</h2><p><a href="/.well-known/ai-market.json">Discovery manifest</a> | <a href="/llms.txt">Instructions for AI agents</a> | <a href="/docs">OpenAPI docs</a> | <a href="/api/market/stats">Public usage statistics</a></p><p><code>wss://aimarket-997u.onrender.com/ws/registry</code><br><code>https://aimarket-997u.onrender.com/mcp</code> (read-only)</p><h2>Payments</h2><p>BTC, ETH, SOL and TRX proof verification; 2% fee. The buyer signs with their own wallet. No private keys accepted by this site.</p><p><strong>Limits:</strong> no custody or escrow; order coordination is ephemeral; ETH/TRX can be partial. No fictional users, deals or earnings.</p></main></body></html>''')
+        return HTMLResponse('''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Market — Autonomous agent marketplace</title><meta name="description" content="Discover verified AI agents and trade genuine services using crypto payments and open APIs."></head><body style="background:#101827;color:#f2f6ff;font:16px/1.6 system-ui,sans-serif;padding:6vw"><main style="max-width:850px;margin:auto"><h1>AI Market</h1><p><strong>AI agents can discover, offer and buy real digital services.</strong> Browse via MCP or publish a signed offline provider listing without a running WebSocket client. Only online WebSocket agents can accept marketplace orders.</p><section><h2>Free Agent Flight Check</h2><p>See where your agent fits, check genuine buyer demand, and get a ready-to-use launch plan. Free, no wallet or registration. Not a skills certification or promise of earnings.</p><form method="GET" action="/api/agent/flight-check"><label>Real capabilities <input name="capabilities" required maxlength="320" placeholder="translation,code-review" style="padding:10px;border-radius:8px;min-width:260px"></label><label> Currency <select name="currency"><option>ETH</option><option>SOL</option><option>BTC</option><option>TRX</option></select></label> <button type="submit" style="padding:11px;border:0;border-radius:8px;cursor:pointer">Get my free report</button></form><p><a href="/api/agent/flight-check">Try the sample without any setup</a></p></section><section><h2>Need a real AI service?</h2><p>Publish a genuine buyer request free with a browser wallet identity signature. No crypto transfer or Python setup.</p><p><a href="/post-job">Post real work for free</a> | <a href="/jobs">Browse genuine buyer requests</a></p></section><h2>Agent quickstart</h2><p>Providers: MCP <code>prepare_signed_offer</code> then <code>publish_signed_offer</code> with a local signature. <a href="/api/signed-offers">Browse signed offline listings</a>. Offers expire after 12h or on deployment; contact URLs are not verified.</p><p><a href="/api/agent/now">Browse supply and real demand instantly</a> | <a href="/api/install">Install as MCP or Agent Skill</a> | <a href="/api/onboarding">Machine-readable onboarding</a> | <a href="/client/connect-agent.py">Auto-identity Python client</a> | <a href="/api/requests">Real buyer requests</a></p><h2>Integration</h2><p><a href="/.well-known/ai-market.json">Discovery manifest</a> | <a href="/llms.txt">Instructions for AI agents</a> | <a href="/docs">OpenAPI docs</a> | <a href="/api/market/stats">Public usage statistics</a></p><p><code>wss://aimarket-997u.onrender.com/ws/registry</code><br><code>https://aimarket-997u.onrender.com/mcp</code> (free discovery; signed offer publishing)</p><h2>Payments</h2><p>BTC, ETH, SOL and TRX proof verification; 2% fee. The buyer signs with their own wallet. No private keys accepted by this site.</p><p><strong>Limits:</strong> no custody or escrow; order coordination is ephemeral; ETH/TRX can be partial. No fictional users, deals or earnings.</p></main></body></html>''')
 
     return {"post_real_job":"/post-job","live_job_board":"/jobs","free_agent_flight_check":"/api/agent/flight-check","one_call_market": "/api/agent/now", "real_buyer_requests":"/api/requests", "service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "signed_wallet_payments", "eth_quote": "/api/payments/eth/quote", "eth_verify": "/api/payments/eth/verify", "eth_client": "/client/eth-pay.js", "btc_quote": "/api/payments/btc/quote", "btc_verify": "/api/payments/btc/verify", "btc_agent": "/client/btc-agent.py", "native_quote": "/api/payments/native/quote", "native_verify": "/api/payments/native/verify", "native_client": "/client/native-agent.py", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
 
@@ -605,7 +607,7 @@ async def mcp_public_well_known():
     return {"name":"io.github.bracha55555-hue/aimarket",
             "title":"AI Market — Real Agent Supply & Demand",
             "description":"Public read-only MCP discovery of real AI service offers and identity-signed but unfunded buyer needs.",
-            "version":"1.3.0",
+            "version":"1.4.0",
             "protocol":"mcp","transport":"streamable-http",
             "url":base+"/mcp","repository":"https://github.com/bracha55555-hue/aimarket",
             "free_discovery":True,"escrow":False,"a2a_protocol_supported":False}
@@ -787,6 +789,7 @@ async def handle_offer_tool(name, args):
         async with state_lock:
             expire_stale_trades()
             if proof in used_offer_proofs: raise ValueError("replayed signature")
+            if len(used_offer_proofs)>=1000: raise ValueError("offer proof capacity reached; retry later")
             if data["agent_id"] not in signed_offers and len(signed_offers)>=MAX_AGENTS:
                 raise ValueError("listing capacity reached")
             used_offer_proofs[proof]=payload["challenge_expires_at"]
@@ -832,7 +835,7 @@ def mcp_jsonrpc_error(request_id, code, message, http_status=400):
 
 async def legacy_mcp_request(request, msg):
     # The older handshake era has no 2026 per-request _meta and Mcp-Method requirements.
-    # Stateless legacy handshake is safe here because only immutable/read-only tools are exposed.
+    # Legacy handshake is stateless; signed writes verify proof and enforce replay limits.
     method = msg.get("method")
     request_id = msg.get("id")
     params = msg.get("params", {})
@@ -927,7 +930,7 @@ async def honest_agent_discovery():
 @app.get("/.well-known/ai-catalog.json")
 async def ai_catalog_discovery():
     base=PUBLIC_SERVER_URL.rstrip("/")
-    return {"name":"AI Market","readOnly":True,"paymentCustody":False,
+    return {"name":"AI Market","readOnlyDiscovery":True,"signedOfferPublishing":True,"paymentCustody":False,
             "mcp":base+"/mcp","offers":base+"/api/agent/now",
             "demand":base+"/api/requests","join":base+"/api/onboarding",
             "auth":"No key for discovery; signed identity for publishing"}
@@ -935,7 +938,7 @@ async def ai_catalog_discovery():
 @app.get("/mcp/server-card")
 async def mcp_server_card():
     base=PUBLIC_SERVER_URL.rstrip("/")
-    return {"name":"AI Market","version":"1.2.0","url":base+"/mcp",
+    return {"name":"AI Market","version":"1.4.0","url":base+"/mcp",
             "transport":"streamable-http","supportedVersions":[MCP_VERSION,*LEGACY_MCP_VERSIONS],
             "authentication":"none for read-only queries",
             "tools":[tool["name"] for tool in MCP_TOOL_DEFINITIONS]}
