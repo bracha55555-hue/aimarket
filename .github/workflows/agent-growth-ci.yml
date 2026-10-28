@@ -17,6 +17,63 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt httpx
       - run: python -m py_compile app.py
+      - name: Verify free Agent Flight Check is honest, bounded and works on both MCP eras
+        run: |
+          python - <<'PY'
+          import json,time
+          from fastapi.testclient import TestClient
+          import app as m
+          with TestClient(m.app) as c:
+              sample=c.get("/api/agent/flight-check").json()
+              assert sample["sample_input"] is True
+              assert sample["live_opportunity"]["match_count"]==0
+              assert sample["certification"] is False
+              assert sample["identity_verified"] is False
+              assert sample["price"]==0 and sample["no_wallet_required"] is True
+              assert set(sample["integrate"]["copyable_services_json"])=={"translation","code-review"}
+              assert c.get("/api/agent/flight-check?capabilities=foo,bar&currency=SOL").status_code==200
+              for args in ("capabilities=foo,%24%28bad%29","capabilities="+",".join(["a"]*9),
+                           "currency=USD","capabilities=","capabilities="+("a"*321)):
+                  q=c.get("/api/agent/flight-check?"+args)
+                  assert q.status_code==422,(args,q.status_code,q.text)
+              fake={"id":"local-test-only","buyer":"0x0000000000000000000000000000000000000001",
+                    "capability":"translation","currency":"SOL","max_budget":0.01,
+                    "created_at":"test","expires_at":"test",
+                    "created_monotonic":time.monotonic()}
+              m.open_needs[fake["id"]]=fake
+              try:
+                  report=c.get("/api/agent/flight-check",params={"capabilities":"translation,translation","currency":"SOL"}).json()
+                  assert report["live_opportunity"]["match_count"]==1
+                  assert report["live_opportunity"]["matches"][0]["id"]=="local-test-only"
+                  assert report["live_opportunity"]["funds_reserved"] is False
+                  report2=c.get("/api/agent/flight-check",params={"capabilities":"translation","currency":"ETH"}).json()
+                  assert report2["live_opportunity"]["match_count"]==0
+              finally:
+                  m.open_needs.clear()
+              headers={"accept":"application/json, text/event-stream",
+                       "content-type":"application/json","mcp-protocol-version":"2025-11-25"}
+              payload={"jsonrpc":"2.0","id":11,"method":"tools/call",
+                       "params":{"name":"agent_flight_check","arguments":{"capabilities":"translation","currency":"ETH"}}}
+              legacy=c.post("/mcp",headers=headers,json=payload)
+              assert legacy.status_code==200,legacy.text
+              assert legacy.json()["result"]["structuredContent"]["no_wallet_required"] is True
+              assert "agent_flight_check" in {x["name"] for x in c.post("/mcp",headers=headers,
+                    json={"jsonrpc":"2.0","id":12,"method":"tools/list","params":{}}).json()["result"]["tools"]}
+              meta={"io.modelcontextprotocol/protocolVersion":"2026-07-28",
+                    "io.modelcontextprotocol/clientCapabilities":{}}
+              modern=c.post("/mcp",headers={**headers,"mcp-protocol-version":"2026-07-28",
+                    "mcp-method":"tools/call","mcp-name":"agent_flight_check"},
+                    json={"jsonrpc":"2.0","id":13,"method":"tools/call",
+                    "params":{"_meta":meta,"name":"agent_flight_check","arguments":{"capabilities":"translation"}}})
+              assert modern.status_code==200,modern.text
+              assert modern.json()["result"]["structuredContent"]["live_opportunity"]["match_count"]==0
+              assert c.get("/api/market/stats").json()["events_since_start"]["flight_checks"]>=4
+              assert "/api/agent/flight-check" in c.get("/sitemap.xml").text
+              assert "Agent Flight Check" in c.get("/",headers={"accept":"text/html"}).text
+              assert c.get("/api/install").json()["free_agent_flight_check"].endswith("/api/agent/flight-check")
+              assert all(x in m.FEE_WALLETS for x in ("BTC","ETH","SOL","TRX"))
+          print("PASS free flight check, synthetic-local demand isolation, real-MCP-call, validation, conversion funnel")
+          PY
       - name: Validate portable Agent Skill and public zero-auth install
         run: |
           python - <<'PY'
