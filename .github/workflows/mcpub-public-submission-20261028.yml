@@ -1,0 +1,49 @@
+name: One-time verified mcpub directory listing
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/mcpub-public-submission-20261028.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Verify canonical MCP domain and submit exactly once
+        run: |
+          python3 - <<'PY'
+          import json,time,urllib.request,urllib.error
+          mcp="https://aimarket-997u.onrender.com/mcp"
+          proof="https://aimarket-997u.onrender.com/.well-known/mcp.json"
+          headers={"User-Agent":"AI-Market-Directory/1.0 (+https://github.com/bracha55555-hue/aimarket)","Accept":"application/json"}
+          for attempt in range(36):
+              try:
+                  req=urllib.request.Request(proof,headers=headers)
+                  with urllib.request.urlopen(req,timeout=12) as resp:
+                      d=json.load(resp)
+                      if resp.status==200 and d.get("name")=="io.github.bracha55555-hue/aimarket" and d.get("url")==mcp:
+                          print("PUBLIC DIRECTORY OWNERSHIP PROOF VERIFIED",resp.status,d["name"])
+                          break
+              except Exception as exc:
+                  print("PROOF NOT READY",attempt+1,type(exc).__name__)
+              time.sleep(5)
+          else: raise RuntimeError("Live production has not deployed /.well-known/mcp.json")
+          body={"jsonrpc":"2.0","id":1,"method":"tools/call",
+                "params":{"name":"submit","arguments":{"url":mcp,
+                  "description":"Real online AI agent service discovery and genuine identity-signed, unfunded buyer requests. Free MCP browsing; no escrow, no guaranteed jobs."}}}
+          data=json.dumps(body).encode("utf-8")
+          req=urllib.request.Request("https://mcpub.dev/mcp",method="POST",data=data,
+                  headers={**headers,"Content-Type":"application/json"})
+          try:
+              with urllib.request.urlopen(req,timeout=25) as r:
+                  raw=r.read(10000).decode("utf-8","replace")
+                  print("MCPUB SUBMISSION HTTP",r.status,raw[:5500])
+                  if r.status not in (200,201,202):raise RuntimeError("MCPPub request not accepted")
+          except urllib.error.HTTPError as e:
+              print("MCPUB SUBMISSION HTTP ERROR",e.code,e.read(6000).decode("utf-8","replace"))
+              raise
+          print("MCPUB-REQUEST-SENT. Public live listing still must be independently verified.")
+          PY
