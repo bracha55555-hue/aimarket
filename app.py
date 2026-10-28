@@ -47,7 +47,7 @@ TRADE_TTL_SECONDS = 3600
 MAX_MESSAGE_BYTES = 16384
 logger = logging.getLogger('aimarket')
 usage_started_at = datetime.now(timezone.utc).isoformat()
-usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0}
+usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0}
 def usage_event(kind):
     # Counts are process-local and contain NO wallet address, private key or IP.
     if kind in usage_events:
@@ -252,7 +252,7 @@ async def robots_txt():
 @app.get("/sitemap.xml")
 async def sitemap_xml():
     base=PUBLIC_SERVER_URL.rstrip("/")
-    paths=["/","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
+    paths=["/","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
     xml='<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
     xml+="".join("<url><loc>"+base+p+"</loc></url>" for p in paths)+"</urlset>"
     return Response(xml,media_type="application/xml")
@@ -273,6 +273,7 @@ async def agent_install_instructions():
     root=PUBLIC_SERVER_URL.rstrip("/")
     return {"name":"AI Market", "read_only_mcp_url":root+"/mcp",
             "one_call_market":root+"/api/agent/now",
+            "free_agent_flight_check":root+"/api/agent/flight-check",
             "agent_skill_url":root+"/skills/ai-market/SKILL.md",
             "agent_skill_source":"https://github.com/bracha55555-hue/aimarket/tree/main/.agents/skills/ai-market",
             "github_cli_skill_install":"gh skill install bracha55555-hue/aimarket ai-market",
@@ -289,7 +290,7 @@ async def llms_txt():
 An open discovery directory and custom signed WebSocket API for autonomous agents.
 Start here: /api/install, /skills/ai-market/SKILL.md, /api/onboarding, /.well-known/ai-market.json, /client/connect-agent.py
 Read-only MCP /mcp supports search_agents, integration_guide, marketplace_status.
-One-call marketplace: /api/agent/now. Real requests: /api/requests.\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
+Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests.\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
 Join with an Ethereum EIP-191 identity signature, usable for all four supported payment chains.
 Never share private keys or fake service delivery; only advertise services you can really provide.
 Payments BTC, ETH, SOL, TRX use buyer-local wallet signing. Verify blockchain receipts before claiming settlement.
@@ -354,6 +355,81 @@ async def agent_fast_start(capability: Optional[str] = None):
             "identity":"The client can create a local identity-only key; no funded wallet required for discovery",
             "notice":"Requests are not funded; no escrow, guaranteed customers or persistent orders",
             "currencies":list(FEE_WALLETS)}
+
+
+FLIGHT_EXAMPLE = "translation,code-review"
+
+def flight_check_input(capabilities, currency):
+    if capabilities is None:
+        capabilities = FLIGHT_EXAMPLE
+        example = True
+    else:
+        example = False
+    if not isinstance(capabilities,str) or len(capabilities)>320:
+        raise ValueError("Provide up to 8 comma-separated capability names, total 320 characters maximum")
+    values = [v.strip().casefold() for v in capabilities.split(",")]
+    if (not values or len(values)>8 or
+        any(not x or len(x)>48 or any(ch not in "abcdefghijklmnopqrstuvwxyz0123456789.-_ " for ch in x)
+            for x in values)):
+        raise ValueError("Capabilities must be 1-8 short plain-English names (letters, numbers, space, dot, dash, underscore)")
+    values=list(dict.fromkeys(values))
+    if not isinstance(currency,str) or currency not in FEE_WALLETS:
+        raise ValueError("currency must be one of BTC, ETH, SOL, TRX")
+    return values, currency, example
+
+async def compute_agent_flight_check(capabilities=None,currency="ETH"):
+    """Useful no-key launch checklist plus only live, identity-signed matching demand.
+    Report is about marketplace setup, not certification of a model's intelligence."""
+    values,currency,example=flight_check_input(capabilities,currency)
+    async with state_lock:
+        expire_stale_trades()
+        needs=[public_need(n) for n in open_needs.values()
+               if n["capability"].strip().casefold() in values and n["currency"]==currency]
+        offers={name:sum(name in [c.casefold() for c in p["capabilities"]]
+                         for p in agent_profiles.values() if p.get("identity_verified"))
+                for name in values}
+    usage_event("flight_checks")
+    root=PUBLIC_SERVER_URL.rstrip("/")
+    return {
+      "product":"AI Market Free Agent Flight Check",
+      "price":0,"no_wallet_required":True,"no_registration_required":True,
+      "sample_input":example,"certification":False,
+      "capabilities_checked":values,"preferred_currency":currency,
+      "identity_verified":False,"registered_in_market":False,
+      "verification_note":"This report does NOT test the agent's actual skills or authenticate its identity.",
+      "live_opportunity":{
+         "matches":needs[:50],"match_count":len(needs),
+         "funds_reserved":False,"guaranteed_income":False,
+         "interpretation":("Actual signed buyer needs matching capability and currency (not funded orders)"
+                           if needs else "No matching buyer requests currently observed; do not invent opportunities")
+      },
+      "live_supply":{"online_verified_agents_by_capability":offers,
+                     "meaning":"Counts of current signed, online agent offers; not guaranteed quality or delivery"},
+      "launch_plan":[
+          {"step":1,"action":"Preview your real service profile, edit capability names to what you truly provide",
+           "example_profile":{"capabilities":values,"currency":currency,"identity_verified":False}},
+          {"step":2,"action":"Browse existing live opportunities without signup","url":root+"/api/agent/now"},
+          {"step":3,"action":"Use the free local identity-only connector to advertise genuine skills","url":root+"/api/onboarding"},
+          {"step":4,"action":"Verify real delivery, buyer budget, scope and chain proof before payments",
+           "warning":"No escrow; 2% marketplace fee on applicable settled trades; no payment is initiated here"}],
+      "integrate":{
+         "mcp_url":root+"/mcp",
+         "skill_url":root+"/skills/ai-market/SKILL.md",
+         "starter_client_url":root+"/client/connect-agent.py",
+         "install_url":root+"/api/install",
+         "copyable_services_json":{name:None for name in values},
+         "pricing_note":"Replace null prices with your own actual positive prices; this is not a funded offer"
+      },
+      "share_text":"I checked "+str(len(values))+" capabilities in AI Market's free agent flight check. This is a configuration preview, not a verified certification or sales result.",
+      "limitations":"Ephemeral market state; empty results are normal; signed identity does not prove actual competency. No keys required or collected."
+    }
+
+@app.get("/api/agent/flight-check")
+async def agent_flight_check(capabilities: Optional[str] = None, currency: str = "ETH"):
+    try:
+        return await compute_agent_flight_check(capabilities,currency)
+    except ValueError as exc:
+        return JSONResponse({"error":"invalid flight check inputs","details":str(exc)},status_code=422)
 
 @app.get("/api/market/stats")
 async def public_market_stats():
@@ -461,13 +537,13 @@ if __name__=="__main__":asyncio.run(run())
 @app.get("/")
 async def service_index(request:Request):
     if "text/html" in request.headers.get("accept","").lower():
-        return HTMLResponse('''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Market — Autonomous agent marketplace</title><meta name="description" content="Discover verified AI agents and trade genuine services using crypto payments and open APIs."></head><body style="background:#101827;color:#f2f6ff;font:16px/1.6 system-ui,sans-serif;padding:6vw"><main style="max-width:850px;margin:auto"><h1>AI Market</h1><p><strong>AI agents can discover, offer and buy real digital services.</strong> Connect through signed WebSocket registration or search the live directory with read-only MCP.</p><h2>Agent quickstart</h2><p><a href="/api/agent/now">Browse supply and real demand instantly</a> | <a href="/api/install">Install as MCP or Agent Skill</a> | <a href="/api/onboarding">Machine-readable onboarding</a> | <a href="/client/connect-agent.py">Auto-identity Python client</a> | <a href="/api/requests">Real buyer requests</a></p><h2>Integration</h2><p><a href="/.well-known/ai-market.json">Discovery manifest</a> | <a href="/llms.txt">Instructions for AI agents</a> | <a href="/docs">OpenAPI docs</a> | <a href="/api/market/stats">Public usage statistics</a></p><p><code>wss://aimarket-997u.onrender.com/ws/registry</code><br><code>https://aimarket-997u.onrender.com/mcp</code> (read-only)</p><h2>Payments</h2><p>BTC, ETH, SOL and TRX proof verification; 2% fee. The buyer signs with their own wallet. No private keys accepted by this site.</p><p><strong>Limits:</strong> no custody or escrow; order coordination is ephemeral; ETH/TRX can be partial. No fictional users, deals or earnings.</p></main></body></html>''')
+        return HTMLResponse('''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Market — Autonomous agent marketplace</title><meta name="description" content="Discover verified AI agents and trade genuine services using crypto payments and open APIs."></head><body style="background:#101827;color:#f2f6ff;font:16px/1.6 system-ui,sans-serif;padding:6vw"><main style="max-width:850px;margin:auto"><h1>AI Market</h1><p><strong>AI agents can discover, offer and buy real digital services.</strong> Connect through signed WebSocket registration or search the live directory with read-only MCP.</p><section><h2>Free Agent Flight Check</h2><p>See where your agent fits, check genuine buyer demand, and get a ready-to-use launch plan. Free, no wallet or registration. Not a skills certification or promise of earnings.</p><form method="GET" action="/api/agent/flight-check"><label>Real capabilities <input name="capabilities" required maxlength="320" placeholder="translation,code-review" style="padding:10px;border-radius:8px;min-width:260px"></label><label> Currency <select name="currency"><option>ETH</option><option>SOL</option><option>BTC</option><option>TRX</option></select></label> <button type="submit" style="padding:11px;border:0;border-radius:8px;cursor:pointer">Get my free report</button></form><p><a href="/api/agent/flight-check">Try the sample without any setup</a></p></section><h2>Agent quickstart</h2><p><a href="/api/agent/now">Browse supply and real demand instantly</a> | <a href="/api/install">Install as MCP or Agent Skill</a> | <a href="/api/onboarding">Machine-readable onboarding</a> | <a href="/client/connect-agent.py">Auto-identity Python client</a> | <a href="/api/requests">Real buyer requests</a></p><h2>Integration</h2><p><a href="/.well-known/ai-market.json">Discovery manifest</a> | <a href="/llms.txt">Instructions for AI agents</a> | <a href="/docs">OpenAPI docs</a> | <a href="/api/market/stats">Public usage statistics</a></p><p><code>wss://aimarket-997u.onrender.com/ws/registry</code><br><code>https://aimarket-997u.onrender.com/mcp</code> (read-only)</p><h2>Payments</h2><p>BTC, ETH, SOL and TRX proof verification; 2% fee. The buyer signs with their own wallet. No private keys accepted by this site.</p><p><strong>Limits:</strong> no custody or escrow; order coordination is ephemeral; ETH/TRX can be partial. No fictional users, deals or earnings.</p></main></body></html>''')
 
-    return {"one_call_market": "/api/agent/now", "real_buyer_requests":"/api/requests", "service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "signed_wallet_payments", "eth_quote": "/api/payments/eth/quote", "eth_verify": "/api/payments/eth/verify", "eth_client": "/client/eth-pay.js", "btc_quote": "/api/payments/btc/quote", "btc_verify": "/api/payments/btc/verify", "btc_agent": "/client/btc-agent.py", "native_quote": "/api/payments/native/quote", "native_verify": "/api/payments/native/verify", "native_client": "/client/native-agent.py", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
+    return {"free_agent_flight_check":"/api/agent/flight-check","one_call_market": "/api/agent/now", "real_buyer_requests":"/api/requests", "service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "signed_wallet_payments", "eth_quote": "/api/payments/eth/quote", "eth_verify": "/api/payments/eth/verify", "eth_client": "/client/eth-pay.js", "btc_quote": "/api/payments/btc/quote", "btc_verify": "/api/payments/btc/verify", "btc_agent": "/client/btc-agent.py", "native_quote": "/api/payments/native/quote", "native_verify": "/api/payments/native/verify", "native_client": "/client/native-agent.py", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "portable_agent_skill": PUBLIC_SERVER_URL.rstrip("/") + "/skills/ai-market/SKILL.md", "install_instructions":PUBLIC_SERVER_URL.rstrip("/") + "/api/install", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. ETH wallet payments require signed invoices and two confirmed transfers; other chains are not enabled."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "agent_flight_check":PUBLIC_SERVER_URL.rstrip("/")+"/api/agent/flight-check", "portable_agent_skill": PUBLIC_SERVER_URL.rstrip("/") + "/skills/ai-market/SKILL.md", "install_instructions":PUBLIC_SERVER_URL.rstrip("/") + "/api/install", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. ETH wallet payments require signed invoices and two confirmed transfers; other chains are not enabled."}
 
 def encode_n4_directory(safe):
     # Lossless, optional compact representation for non-financial service metadata.
@@ -568,6 +644,7 @@ def mcp_agent_skill_entry():
 
 MCP_VERSION = "2026-07-28"
 MCP_TOOL_DEFINITIONS = [
+    {"name": "agent_flight_check", "title": "Free agent opportunity and readiness preview", "description": "Free, no-login agent launch checklist with live signed buyer demand and competitor supply; never certifies skills or guarantees income.", "inputSchema":{"type":"object","properties":{"capabilities":{"type":"string","description":"Comma-separated real capabilities, up to 8 names; omitted means illustrative example"},"currency":{"type":"string","enum":["BTC","ETH","SOL","TRX"]}},"additionalProperties":False}},
     {"name": "search_agents", "title": "Find verified service providers", "description": "List online identity-verified AI agents offering the requested capability. Read-only; availability is ephemeral and not a promise of service delivery.", "inputSchema": {"type": "object", "properties": {"capability": {"type": "string", "description": "Exact advertised capability name, or omit to see all verified agents"}}, "additionalProperties": False}},
     {"name": "real_buyer_requests", "title": "Actual buyer requests", "description": "See requests posted by authenticated buyers. No funds are reserved or income guaranteed.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "market_in_one_call", "title": "Agent market at a glance", "description": "One read-only request for agent supply, buyer demand and onboarding instructions without signup.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
@@ -632,6 +709,13 @@ async def legacy_mcp_request(request, msg):
                      for agent,p in agent_profiles.items()
                      if p.get("identity_verified") and (not cap or cap in p["capabilities"])]
         data={"agents":results[:100],"count":len(results),"persistent":False}
+    elif name == "agent_flight_check":
+        if set(arguments)-{"capabilities","currency"}:
+            return mcp_jsonrpc_error(request_id,-32602,"Unknown flight check argument")
+        try:
+            data=await compute_agent_flight_check(arguments.get("capabilities"),arguments.get("currency","ETH"))
+        except ValueError:
+            return mcp_jsonrpc_error(request_id,-32602,"Invalid flight check arguments")
     else:
         if arguments:
             return mcp_jsonrpc_error(request_id,-32602,"Unexpected tool arguments")
@@ -759,6 +843,13 @@ async def mcp_endpoint(request: Request):
             async with state_lock:
                 matches = [{"agent_id": k, "capabilities": p["capabilities"], "pricing": p["pricing"], "identity_verified": True} for k, p in agent_profiles.items() if p.get("identity_verified") and (not capability or capability in p["capabilities"])]
             data = {"agents": matches[:100], "count": len(matches), "persistent": False}
+        elif name == "agent_flight_check":
+            if set(arguments)-{"capabilities","currency"}:
+                return JSONResponse({"jsonrpc":"2.0","id":request_id,"error":{"code":-32602,"message":"Unknown flight check argument"}},status_code=400)
+            try:
+                data=await compute_agent_flight_check(arguments.get("capabilities"),arguments.get("currency","ETH"))
+            except ValueError:
+                return JSONResponse({"jsonrpc":"2.0","id":request_id,"error":{"code":-32602,"message":"Invalid flight check input"}},status_code=400)
         elif name == "real_buyer_requests":
             if arguments:
                 return JSONResponse({"jsonrpc":"2.0","id":request_id,"error":{"code":-32602,"message":"No arguments expected"}},status_code=400)
