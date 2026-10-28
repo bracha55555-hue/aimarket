@@ -1,4 +1,5 @@
-import os, asyncio, urllib.request, json, uuid, math, logging, base64, time, hashlib, html
+import os, asyncio, urllib.request, json, uuid, math, logging, base64, time, hashlib, html, hmac, secrets, re
+from urllib.parse import urlsplit
 from datetime import datetime, timezone
 from decimal import Decimal
 from collections import Counter
@@ -39,6 +40,11 @@ agent_profiles: Dict[str, dict] = {}
 agent_reputation: Dict[str, dict] = {}
 active_trades: Dict[str, dict] = {}
 open_needs: Dict[str, dict] = {}
+signed_offers: Dict[str, dict] = {}
+used_offer_proofs: Dict[str, int] = {}
+OFFER_CHALLENGE_SECRET = secrets.token_bytes(32)
+OFFER_TTL_SECONDS = 43200
+OFFER_CHALLENGE_SECONDS = 300
 MAX_PUBLIC_NEEDS = 100
 NEED_TTL_SECONDS = 3600
 MAX_AGENTS = 200
@@ -54,7 +60,7 @@ if not logger.handlers:
     logger.addHandler(_usage_handler)
 logger.propagate = False
 usage_started_at = datetime.now(timezone.utc).isoformat()
-usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0, "buyer_studio_views":0}
+usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0, "buyer_studio_views":0, "signed_offers_published":0}
 def usage_event(kind):
     # Counts are process-local and contain NO wallet address, private key or IP.
     if kind in usage_events:
@@ -84,6 +90,11 @@ def expire_stale_trades(now=None):
     for nid, need in list(open_needs.items()):
         if current >= need["created_monotonic"] + NEED_TTL_SECONDS:
             open_needs.pop(nid, None)
+    for ident, offer in list(signed_offers.items()):
+        if time.time() >= offer["expires_at_unix"]:
+            signed_offers.pop(ident,None)
+    for proof, expires in list(used_offer_proofs.items()):
+        if time.time() >= expires: used_offer_proofs.pop(proof,None)
     return len(expired)
 
 async def stale_order_reaper():
@@ -357,6 +368,7 @@ async def agent_fast_start(capability: Optional[str] = None):
     return {"service":"AI Market","browse_without_wallet":True,
             "available_agents":sellers[:100],"available_agents_count":len(sellers),
             "real_buyer_requests":needs[:100],"real_requests_count":len(needs),
+            "signed_offline_offers_api":"/api/signed-offers","offer_tool":"prepare_signed_offer",
             "why_join":["Find actual requests from verified agent identities",
                         "Advertise real capabilities at no listing fee; receive relevant demand alerts",
                         "Browse freely; platform fee of 2% applies to eligible completed crypto trades"],
@@ -440,6 +452,11 @@ async def agent_flight_check(capabilities: Optional[str] = None, currency: str =
     except ValueError as exc:
         return JSONResponse({"error":"invalid flight check inputs","details":str(exc)},status_code=422)
 
+@app.get("/api/signed-offers")
+async def public_signed_offers(capability: Optional[str]=None):
+    try: return await handle_offer_tool("browse_signed_offers",{"capability":capability} if capability is not None else {})
+    except ValueError as exc: return JSONResponse({"error":str(exc)},status_code=422)
+
 @app.get("/api/market/stats")
 async def public_market_stats():
     async with state_lock:
@@ -448,7 +465,8 @@ async def public_market_stats():
         pending=sum(t.get("status") in ("pending","delivered","awaiting_payment") for t in active_trades.values())
     return {"since":usage_started_at,"scope":"current process only; resets on restart/redeploy",
             "authenticated_online_agents":connected,"available_service_offers":services,
-            "unsettled_orders_in_memory":pending,"open_verified_buyer_requests":len(open_needs),"events_since_start":dict(usage_events),
+            "unsettled_orders_in_memory":pending,"open_verified_buyer_requests":len(open_needs),
+            "signed_offline_offers":len(signed_offers),"events_since_start":dict(usage_events),
             "note":"Event counts are not unique customers or confirmed revenue."}
 
 @app.get("/client/connect-agent.py")
@@ -694,7 +712,109 @@ def mcp_agent_skill_entry():
                           "size":len(raw)}]}
 
 MCP_VERSION = "2026-07-28"
+
+def validated_offer_fields(agent_id, capability, currency, price, contact_url):
+    if not isinstance(agent_id,str) or not Web3.is_address(agent_id):
+        raise ValueError("valid EVM identity address required")
+    if (not isinstance(capability,str) or not 1<=len(capability.strip())<=48
+        or not re.fullmatch(r"[a-zA-Z0-9 ._-]+",capability.strip())):
+        raise ValueError("invalid capability")
+    if not isinstance(currency,str) or currency not in FEE_WALLETS:
+        raise ValueError("unsupported currency")
+    if isinstance(price,bool) or not isinstance(price,(int,float)) or not math.isfinite(price) or not 0<price<=100000:
+        raise ValueError("invalid positive price")
+    if not isinstance(contact_url,str) or len(contact_url)>240 or any(ord(c)<33 or c=="\\\\"
+        for c in contact_url):
+        raise ValueError("invalid provider contact URL")
+    try:
+        u=urlsplit(contact_url)
+        hostname=u.hostname or ""
+        valid_url=(u.scheme=="https" and bool(hostname) and "." in hostname
+                   and bool(re.fullmatch(r"[a-zA-Z0-9.-]+",hostname))
+                   and not any(p.startswith("-") or p.endswith("-") or not p
+                               for p in hostname.split("."))
+                   and u.port in (None,443) and u.username is None and u.password is None
+                   and not u.fragment and len(hostname)<180)
+    except ValueError:
+        valid_url=False
+    if not valid_url: raise ValueError("contact URL must be a public HTTPS domain")
+    return {"agent_id":agent_id.lower(),"capability":capability.strip().casefold(),
+            "currency":currency,"price":float(price),"contact_url":contact_url}
+
+def offer_signing_message(payload):
+    return "AI Market signed provider listing v1\\n"+json.dumps(payload,sort_keys=True,separators=(",",":"),ensure_ascii=True)
+
+async def handle_offer_tool(name, args):
+    if name=="prepare_signed_offer":
+        if set(args)!={"agent_id","capability","currency","price","contact_url"}:
+            raise ValueError("provide agent_id, capability, currency, price and contact_url")
+        data=validated_offer_fields(**args)
+        data["nonce"]=secrets.token_hex(16)
+        data["challenge_expires_at"]=int(time.time())+OFFER_CHALLENGE_SECONDS
+        message=offer_signing_message(data)
+        proof=hmac.new(OFFER_CHALLENGE_SECRET,message.encode("utf-8"),hashlib.sha256).hexdigest()
+        return {"sign_this_message_exactly":message,"challenge_proof":proof,
+                "signature_scheme":"EIP-191 personal_sign","expires_in_seconds":OFFER_CHALLENGE_SECONDS,
+                "next_tool":"publish_signed_offer","private_key_required_by_server":False,
+                "notice":"Locally sign the exact message; submit signature, message and proof only. This does not send funds."}
+    if name=="publish_signed_offer":
+        if set(args)!={"message","challenge_proof","signature"}:
+            raise ValueError("provide exact challenge message, proof and EIP-191 signature")
+        msg,proof,sig=args["message"],args["challenge_proof"],args["signature"]
+        if (not isinstance(msg,str) or len(msg)>1024 or not msg.startswith("AI Market signed provider listing v1\\n")
+            or not isinstance(proof,str) or not re.fullmatch(r"[a-f0-9]{64}",proof)
+            or not isinstance(sig,str) or not re.fullmatch(r"(0x)?[a-fA-F0-9]{130}",sig)):
+            raise ValueError("invalid proof or signature shape")
+        expected=hmac.new(OFFER_CHALLENGE_SECRET,msg.encode("utf-8"),hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(proof,expected): raise ValueError("invalid or expired server proof")
+        try:
+            payload=json.loads(msg.split("\\n",1)[1])
+            data=validated_offer_fields(*(payload[k] for k in
+                    ("agent_id","capability","currency","price","contact_url")))
+            if (set(payload)!=set(data)|{"nonce","challenge_expires_at"}
+                or not isinstance(payload["nonce"],str) or
+                not re.fullmatch("[a-f0-9]{32}",payload["nonce"]) or
+                type(payload["challenge_expires_at"]) is not int or
+                not 0<=payload["challenge_expires_at"]-int(time.time())<=OFFER_CHALLENGE_SECONDS or
+                msg!=offer_signing_message(payload) or
+                any(payload[k]!=data[k] for k in data)):
+                raise ValueError("invalid signed payload")
+            signer=Account.recover_message(encode_defunct(text=msg),signature=sig)
+        except Exception:
+            raise ValueError("invalid signature or signed payload")
+        if signer.lower()!=data["agent_id"]:
+            raise ValueError("identity signature mismatch")
+        async with state_lock:
+            expire_stale_trades()
+            if proof in used_offer_proofs: raise ValueError("replayed signature")
+            if data["agent_id"] not in signed_offers and len(signed_offers)>=MAX_AGENTS:
+                raise ValueError("listing capacity reached")
+            used_offer_proofs[proof]=payload["challenge_expires_at"]
+            signed_offers[data["agent_id"]]={**data,"expires_at_unix":int(time.time())+OFFER_TTL_SECONDS}
+            row=dict(signed_offers[data["agent_id"]])
+        usage_event("signed_offers_published")
+        return {"published":True,"listing":row,"expires_in_seconds":OFFER_TTL_SECONDS,
+                "online":False,"can_accept_marketplace_orders":False,"contact_url_verified":False,
+                "identity_verified":True,"funded":False,"persistence":"Process-local only; redeploy clears the listing",
+                "note":"This listing verifies control of an identity key, not capability, URL ownership or service delivery. Buyers must independently validate."}
+    if name=="browse_signed_offers":
+        if set(args)-{"capability"}: raise ValueError("invalid filters")
+        cap=args.get("capability")
+        if cap is not None and (not isinstance(cap,str) or len(cap)>48):
+            raise ValueError("invalid capability")
+        async with state_lock:
+            expire_stale_trades()
+            rows=[dict(o) for o in signed_offers.values() if not cap or cap.casefold() in o["capability"]]
+        return {"signed_offline_offers":rows[:MAX_AGENTS],"count":len(rows),
+                "available_now":False,"identity_only":True,"contact_urls_unverified":True,
+                "persistence":"Process-local; expires after 12h or deploy",
+                "notice":"Not online providers; browse/consult seller contact directly, do not send payment based on this directory."}
+    raise ValueError("unsupported offer tool")
+
 MCP_TOOL_DEFINITIONS = [
+    {"name":"prepare_signed_offer","title":"Prepare a no-install service listing","description":"Generate a domain-bound time-limited EIP-191 message for a self-declared service offering; identity key stays local. No funds moved.","inputSchema":{"type":"object","properties":{"agent_id":{"type":"string"},"capability":{"type":"string"},"currency":{"type":"string","enum":["BTC","ETH","SOL","TRX"]},"price":{"type":"number","exclusiveMinimum":0},"contact_url":{"type":"string","description":"HTTPS URL of seller-managed intake (not verified by AI Market)"}},"required":["agent_id","capability","currency","price","contact_url"],"additionalProperties":False}},
+    {"name":"publish_signed_offer","title":"Publish signed service listing (changes market)","description":"Publish a time-limited offline self-declared offer using proof, exact signed message and EIP-191 signature. Consent required; no payment. NOT an online live provider.","inputSchema":{"type":"object","properties":{"message":{"type":"string"},"challenge_proof":{"type":"string"},"signature":{"type":"string"}},"required":["message","challenge_proof","signature"],"additionalProperties":False}},
+    {"name":"browse_signed_offers","title":"Browse signed offline service offers","description":"Discover signed but offline/availability-unverified seller listings; no funds or trust guaranteed.","inputSchema":{"type":"object","properties":{"capability":{"type":"string"}},"additionalProperties":False}},
     {"name": "agent_flight_check", "title": "Free agent opportunity and readiness preview", "description": "Free, no-login agent launch checklist with live signed buyer demand and competitor supply; never certifies skills or guarantees income.", "inputSchema":{"type":"object","properties":{"capabilities":{"type":"string","description":"Comma-separated real capabilities, up to 8 names; omitted means illustrative example"},"currency":{"type":"string","enum":["BTC","ETH","SOL","TRX"]}},"additionalProperties":False}},
     {"name": "search_agents", "title": "Find verified service providers", "description": "List online identity-verified AI agents offering the requested capability. Read-only; availability is ephemeral and not a promise of service delivery.", "inputSchema": {"type": "object", "properties": {"capability": {"type": "string", "description": "Exact advertised capability name, or omit to see all verified agents"}}, "additionalProperties": False}},
     {"name": "real_buyer_requests", "title": "Actual buyer requests", "description": "See requests posted by authenticated buyers. No funds are reserved or income guaranteed.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
@@ -733,8 +853,8 @@ async def legacy_mcp_request(request, msg):
         return {"jsonrpc":"2.0","id":request_id,"result":{
             "protocolVersion":negotiated,
             "capabilities":{"tools":{"listChanged":False}},
-            "serverInfo":{"name":"AI Market","version":"1.2.0"},
-            "instructions":"Read-only public supply and genuine buyer requests. No authentication required to browse. No escrow or assured buyer funds."}}
+            "serverInfo":{"name":"AI Market","version":"1.4.0"},
+            "instructions":"Read-only discovery is free. Signed offer tools require local EIP-191 signature and caller consent; no escrow, guarantee or assured buyer funds."}}
     header_version=request.headers.get("mcp-protocol-version")
     if header_version and header_version not in LEGACY_MCP_VERSIONS:
         return mcp_jsonrpc_error(request_id,-32600,"Unsupported legacy MCP version")
@@ -749,7 +869,11 @@ async def legacy_mcp_request(request, msg):
     name, arguments = params.get("name"),params.get("arguments",{})
     if not isinstance(arguments,dict) or name not in {tool["name"] for tool in MCP_TOOL_DEFINITIONS}:
         return mcp_jsonrpc_error(request_id,-32602,"Invalid tool name or arguments")
-    if name == "search_agents":
+    if name in ("prepare_signed_offer","publish_signed_offer","browse_signed_offers"):
+        try: data=await handle_offer_tool(name,arguments)
+        except ValueError as exc:
+            return mcp_jsonrpc_error(request_id,-32602,str(exc))
+    elif name == "search_agents":
         cap=arguments.get("capability")
         if (set(arguments)-{"capability"} or
             (cap is not None and (not isinstance(cap,str) or len(cap)>64))):
@@ -887,7 +1011,11 @@ async def mcp_endpoint(request: Request):
             return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32020, "message": "Tool name header mismatch"}}, status_code=400)
         if not isinstance(arguments, dict) or name not in {tool["name"] for tool in MCP_TOOL_DEFINITIONS}:
             return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "Invalid tool or arguments"}}, status_code=400)
-        if name == "search_agents":
+        if name in ("prepare_signed_offer","publish_signed_offer","browse_signed_offers"):
+            try: data=await handle_offer_tool(name,arguments)
+            except ValueError as exc:
+                return JSONResponse({"jsonrpc":"2.0","id":request_id,"error":{"code":-32602,"message":str(exc)}},status_code=400)
+        elif name == "search_agents":
             capability = arguments.get("capability")
             if arguments.keys() - {"capability"} or (capability is not None and (not isinstance(capability, str) or len(capability) > 64)):
                 return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "Invalid capability"}}, status_code=400)
@@ -923,7 +1051,7 @@ async def mcp_endpoint(request: Request):
     else:
         return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": "Method not found"}}, status_code=404)
     usage_event("mcp_calls")
-    result["_meta"] = {"io.modelcontextprotocol/serverInfo": {"name": "AI-Market", "version": "1.2.0"}}
+    result["_meta"] = {"io.modelcontextprotocol/serverInfo": {"name": "AI-Market", "version": "1.4.0"}}
     return JSONResponse({"jsonrpc": "2.0", "id": request_id, "result": result}, headers={"Cache-Control": "no-store" if method == "tools/call" else "public, max-age=300"})
 
 
