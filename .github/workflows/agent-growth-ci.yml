@@ -17,6 +17,63 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt httpx
       - run: python -m py_compile app.py
+      - name: Verify browser buyer funnel, safe output, identity signature and cancellation
+        run: |
+          node --check client/buyer-studio.js
+          python - <<'PY'
+          from fastapi.testclient import TestClient
+          from eth_account import Account
+          from eth_account.messages import encode_defunct
+          import app
+          with TestClient(app.app) as c:
+              initial=c.get("/api/requests").json()
+              assert initial["count"]==0
+              ui=c.get("/post-job")
+              assert ui.status_code==200 and "Sign identity and post" in ui.text
+              assert "script-src 'self'" in ui.headers["content-security-policy"]
+              assert "unsafe-inline" not in ui.headers["content-security-policy"].split("script-src")[1].split(";")[0]
+              script=c.get("/client/buyer-studio.js")
+              assert script.status_code==200
+              assert "personal_sign" in script.text
+              assert "eth_sendTransaction" not in script.text
+              assert "privateKey" not in script.text
+              assert c.get("/sitemap.xml").text.count("/post-job")==1
+              assert "/post-job" in c.get("/",headers={"accept":"text/html"}).text
+              who=Account.create()
+              with c.websocket_connect("/ws/registry") as ws:
+                  ws.send_json({"agent_id":who.address.lower(),"capabilities":[],"pricing":{}})
+                  challenge=ws.receive_json()
+                  assert challenge["event"]=="auth_challenge"
+                  signature=Account.sign_message(encode_defunct(text=challenge["message"]),who.key).signature.hex()
+                  ws.send_json({"action":"authenticate","signature":signature})
+                  welcome=ws.receive_json()
+                  assert welcome["status"]=="registered" and welcome["identity_verified"]
+                  ws.send_json({"action":"publish_need","capability":"translation","currency":"ETH",
+                                "max_budget":0.01,"details":"<script>alert('x')</script> translate a real file"})
+                  made=ws.receive_json()
+                  assert made["event"]=="request_published",made
+                  item=made["request"]
+                  assert item["details"].startswith("<script>")
+                  assert made["funds_reserved"] is False
+                  board=c.get("/jobs")
+                  assert board.status_code==200
+                  assert "<script>alert" not in board.text
+                  assert "&lt;script&gt;" in board.text
+                  record=c.get("/api/requests").json()
+                  assert record["count"]==1 and record["verified_buyer_requests"][0]["id"]==item["id"]
+                  ws.send_json({"action":"cancel_need","request_id":item["id"]})
+                  cancelled=ws.receive_json()
+                  assert cancelled["event"]=="request_cancelled" and cancelled["removed"]
+                  assert c.get("/api/requests").json()["count"]==0
+                  ws.send_json({"action":"publish_need","capability":"translation","currency":"ETH",
+                                "max_budget":0.01,"details":"bad" + chr(0)})
+                  assert ws.receive_json()["error"]=="invalid_buyer_request_details"
+              counters=c.get("/api/market/stats").json()["events_since_start"]
+              assert counters["buyer_studio_views"]>=1 and counters["requests_published"]==1
+              assert counters["requests_cancelled"]==1
+              assert all(x in app.FEE_WALLETS for x in ("BTC","ETH","SOL","TRX"))
+          print("PASS browser buyer funnel, signed real demand, XSS escaping and cancellation, no funds")
+          PY
       - name: Verify free Agent Flight Check is honest, bounded and works on both MCP eras
         run: |
           python - <<'PY'
