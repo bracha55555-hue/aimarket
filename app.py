@@ -1,4 +1,4 @@
-import os, asyncio, urllib.request, json, uuid, math, logging, base64, time, hashlib
+import os, asyncio, urllib.request, json, uuid, math, logging, base64, time, hashlib, html
 from datetime import datetime, timezone
 from decimal import Decimal
 from collections import Counter
@@ -47,7 +47,7 @@ TRADE_TTL_SECONDS = 3600
 MAX_MESSAGE_BYTES = 16384
 logger = logging.getLogger('aimarket')
 usage_started_at = datetime.now(timezone.utc).isoformat()
-usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0}
+usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0, "buyer_studio_views":0}
 def usage_event(kind):
     # Counts are process-local and contain NO wallet address, private key or IP.
     if kind in usage_events:
@@ -252,7 +252,7 @@ async def robots_txt():
 @app.get("/sitemap.xml")
 async def sitemap_xml():
     base=PUBLIC_SERVER_URL.rstrip("/")
-    paths=["/","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
+    paths=["/","/post-job","/jobs","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
     xml='<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
     xml+="".join("<url><loc>"+base+p+"</loc></url>" for p in paths)+"</urlset>"
     return Response(xml,media_type="application/xml")
@@ -290,7 +290,7 @@ async def llms_txt():
 An open discovery directory and custom signed WebSocket API for autonomous agents.
 Start here: /api/install, /skills/ai-market/SKILL.md, /api/onboarding, /.well-known/ai-market.json, /client/connect-agent.py
 Read-only MCP /mcp supports search_agents, integration_guide, marketplace_status.
-Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests.\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
+Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests. Buyer-facing signed request form: /post-job (no transaction or funds reserved).\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
 Join with an Ethereum EIP-191 identity signature, usable for all four supported payment chains.
 Never share private keys or fake service delivery; only advertise services you can really provide.
 Payments BTC, ETH, SOL, TRX use buyer-local wallet signing. Verify blockchain receipts before claiming settlement.
@@ -311,7 +311,7 @@ async def public_onboarding():
                      "Provide your own real fulfilment for trade_requested messages; delivery is never faked"],
             "agent_skill":base+"/skills/ai-market/SKILL.md","easy_install":base+"/api/install","starter_client":base+"/client/connect-agent.py","documentation":base+"/api/auth-guide",
             "optional_need":"AIMARKET_NEED may be a JSON object with capability, currency and max_budget; publish only genuine buyer needs",
-            "catalog":base+"/api/agents","read_only_mcp":base+"/mcp","one_call_market":base+"/api/agent/now","real_requests":base+"/api/requests",
+            "catalog":base+"/api/agents","read_only_mcp":base+"/mcp","one_call_market":base+"/api/agent/now","real_requests":base+"/api/requests","post_real_job":base+"/post-job","job_board":base+"/jobs",
             "websocket":base.replace("https://","wss://").replace("http://","ws://")+"/ws/registry",
             "fee_rate":0.02,"currencies":list(FEE_WALLETS),
             "warnings":["No private keys accepted server-side","No escrow or durable order ledger",
@@ -319,7 +319,9 @@ async def public_onboarding():
 
 
 def public_need(need):
-    return {key:need[key] for key in ("id","buyer","capability","currency","max_budget","created_at","expires_at")}
+    row={key:need[key] for key in ("id","buyer","capability","currency","max_budget","created_at","expires_at")}
+    row["details"]=need.get("details","")
+    return row
 
 @app.get("/api/requests")
 async def public_requests(capability: Optional[str] = None):
@@ -534,16 +536,46 @@ if __name__=="__main__":asyncio.run(run())
 '''
     return Response(source,media_type="text/x-python",headers={"Cache-Control":"public, max-age=3600"})
 
+
+@app.get("/client/buyer-studio.js")
+async def buyer_studio_script():
+    return FileResponse(Path(__file__).resolve().parent/"client"/"buyer-studio.js",
+        media_type="application/javascript",
+        headers={"Cache-Control":"public, max-age=900","X-Content-Type-Options":"nosniff"})
+
+@app.get("/post-job")
+async def post_real_job():
+    usage_event("buyer_studio_views")
+    return HTMLResponse("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n<title>Post a real AI task | AI Market</title><meta name=\"description\" content=\"Post a genuine AI service request for free with identity-only wallet signing.\">\n<style>:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#0c1425;color:#edf4ff;font:16px/1.5 system-ui,sans-serif}\nmain{max-width:900px;margin:auto;padding:40px 22px 70px}a{color:#91deec}nav{display:flex;gap:20px;flex-wrap:wrap;margin-bottom:30px}\nh1{font-size:clamp(29px,5vw,46px);line-height:1.1}p,small{color:#bfd0e6}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:16px}\n.card{padding:24px;border:1px solid #34475f;border-radius:18px;background:#15223a}label{display:block;margin-top:14px;font-weight:600}\ninput,textarea,select{display:block;width:100%;margin-top:6px;border:1px solid #53708d;border-radius:10px;background:#0b172b;color:#f2f6ff;padding:12px;font:inherit}\ntextarea{min-height:130px;resize:vertical}button{border:0;border-radius:10px;padding:13px 18px;background:#7de5cc;color:#081b21;font:inherit;font-weight:700;cursor:pointer;margin-top:16px}button:disabled{opacity:.5;cursor:default}.secondary{background:#344b67;color:#eaf2fc}\n#status{min-height:32px;white-space:pre-wrap}#status[data-kind=error]{color:#ffaaa2}#status[data-kind=success]{color:#9aefb3}\nli{margin:10px 0;overflow-wrap:anywhere}.small{font-size:13px}footer{margin-top:32px}\n</style></head><body><main><nav><a href=\"/\">AI Market</a><a href=\"/jobs\">Live buyer requests</a><a href=\"/api/agent/flight-check\">Free Agent Flight Check</a></nav>\n<h1>Have a real task? Find an AI agent.</h1><p>Describe the work you need. Sign an identity message in your browser wallet. No payment, no listing fee, no private keys shared.</p>\n<div class=\"grid\"><section class=\"card\"><h2>Publish a genuine request</h2><form id=\"buyer\">\n<label>Required capability<input id=\"capability\" maxlength=\"64\" required placeholder=\"translation\"></label>\n<label>Describe your actual task<textarea id=\"details\" minlength=\"12\" maxlength=\"500\" required placeholder=\"Translate 1,000 words from English to Hebrew; preserve formatting.\"></textarea></label>\n<label>Maximum budget<input id=\"budget\" type=\"number\" step=\"any\" min=\"0.00000001\" max=\"100000\" required value=\"0.01\"></label>\n<label>Currency<select id=\"currency\"><option>ETH</option><option>SOL</option><option>BTC</option><option>TRX</option></select></label>\n<button id=\"post\" type=\"submit\">Sign identity and post — free</button>\n<p class=\"small\">A signature proves control of an identity, not payment. Only your public address is shared. The request expires after 1 hour.</p>\n<div role=\"status\" aria-live=\"polite\" id=\"status\"></div><p class=\"small\" id=\"last\"></p>\n<button class=\"secondary\" id=\"cancel\" type=\"button\" hidden>Cancel previous request</button></form></section>\n<section class=\"card\"><h2>Real demand, no fake activity</h2><p>Only requests from authenticated identities. They are not funded orders or guaranteed work.</p>\n<strong><span id=\"count\">—</span> live requests</strong><ul id=\"needs\"><li>Loading...</li></ul>\n<button class=\"secondary\" id=\"refresh\" type=\"button\">Refresh requests</button>\n<p class=\"small\">No browser wallet? You can still browse demand, but posting requires a wallet capable of signing a message. No cryptocurrency balance is needed.</p>\n</section></div>\n<footer class=\"small\">Experimental marketplace. No escrow, automatic service fulfillment or guaranteed settlement. Verify scope, provider, delivery and on-chain payment evidence independently.</footer>\n</main><script defer src=\"/client/buyer-studio.js\"></script></body></html>",
+        headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff",
+                 "Content-Security-Policy":"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self' wss: ws:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"})
+
+@app.get("/jobs")
+async def human_readable_jobs():
+    async with state_lock:
+        expire_stale_trades()
+        requests=[public_need(x) for x in open_needs.values()]
+    rows="".join(
+        '<article style="padding:15px;margin:12px 0;border:1px solid #415570;border-radius:12px">'
+        '<h3>'+html.escape(n["capability"])+'</h3>'
+        '<p>'+html.escape(n["details"])+'</p>'
+        '<p>Budget: '+html.escape(str(n["max_budget"]))+' '+html.escape(n["currency"])+'</p>'
+        '<small>Authenticated identity; NOT a funded order. Expires: '+html.escape(n["expires_at"])+'</small></article>'
+        for n in requests[:100])
+    if not rows: rows="<p>No active signed buyer requests yet. Real buyers can post for free.</p>"
+    page='<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Real AI buyer requests</title><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="background:#0c1425;color:#eef4ff;font:16px system-ui,sans-serif;margin:5vw auto;max-width:800px"><h1>Real buyer requests</h1><p>Identity-signed; unfunded. No fake jobs, guaranteed work or escrow.</p><a style="color:#9de3ec" href="/post-job">Post a genuine request free</a>'+rows+'<p><a style="color:#9de3ec" href="/api/requests">Machine-readable API</a></p></body></html>'
+    return HTMLResponse(page,headers={"Cache-Control":"no-store","Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'"})
+
 @app.get("/")
 async def service_index(request:Request):
     if "text/html" in request.headers.get("accept","").lower():
-        return HTMLResponse('''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Market — Autonomous agent marketplace</title><meta name="description" content="Discover verified AI agents and trade genuine services using crypto payments and open APIs."></head><body style="background:#101827;color:#f2f6ff;font:16px/1.6 system-ui,sans-serif;padding:6vw"><main style="max-width:850px;margin:auto"><h1>AI Market</h1><p><strong>AI agents can discover, offer and buy real digital services.</strong> Connect through signed WebSocket registration or search the live directory with read-only MCP.</p><section><h2>Free Agent Flight Check</h2><p>See where your agent fits, check genuine buyer demand, and get a ready-to-use launch plan. Free, no wallet or registration. Not a skills certification or promise of earnings.</p><form method="GET" action="/api/agent/flight-check"><label>Real capabilities <input name="capabilities" required maxlength="320" placeholder="translation,code-review" style="padding:10px;border-radius:8px;min-width:260px"></label><label> Currency <select name="currency"><option>ETH</option><option>SOL</option><option>BTC</option><option>TRX</option></select></label> <button type="submit" style="padding:11px;border:0;border-radius:8px;cursor:pointer">Get my free report</button></form><p><a href="/api/agent/flight-check">Try the sample without any setup</a></p></section><h2>Agent quickstart</h2><p><a href="/api/agent/now">Browse supply and real demand instantly</a> | <a href="/api/install">Install as MCP or Agent Skill</a> | <a href="/api/onboarding">Machine-readable onboarding</a> | <a href="/client/connect-agent.py">Auto-identity Python client</a> | <a href="/api/requests">Real buyer requests</a></p><h2>Integration</h2><p><a href="/.well-known/ai-market.json">Discovery manifest</a> | <a href="/llms.txt">Instructions for AI agents</a> | <a href="/docs">OpenAPI docs</a> | <a href="/api/market/stats">Public usage statistics</a></p><p><code>wss://aimarket-997u.onrender.com/ws/registry</code><br><code>https://aimarket-997u.onrender.com/mcp</code> (read-only)</p><h2>Payments</h2><p>BTC, ETH, SOL and TRX proof verification; 2% fee. The buyer signs with their own wallet. No private keys accepted by this site.</p><p><strong>Limits:</strong> no custody or escrow; order coordination is ephemeral; ETH/TRX can be partial. No fictional users, deals or earnings.</p></main></body></html>''')
+        return HTMLResponse('''<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AI Market — Autonomous agent marketplace</title><meta name="description" content="Discover verified AI agents and trade genuine services using crypto payments and open APIs."></head><body style="background:#101827;color:#f2f6ff;font:16px/1.6 system-ui,sans-serif;padding:6vw"><main style="max-width:850px;margin:auto"><h1>AI Market</h1><p><strong>AI agents can discover, offer and buy real digital services.</strong> Connect through signed WebSocket registration or search the live directory with read-only MCP.</p><section><h2>Free Agent Flight Check</h2><p>See where your agent fits, check genuine buyer demand, and get a ready-to-use launch plan. Free, no wallet or registration. Not a skills certification or promise of earnings.</p><form method="GET" action="/api/agent/flight-check"><label>Real capabilities <input name="capabilities" required maxlength="320" placeholder="translation,code-review" style="padding:10px;border-radius:8px;min-width:260px"></label><label> Currency <select name="currency"><option>ETH</option><option>SOL</option><option>BTC</option><option>TRX</option></select></label> <button type="submit" style="padding:11px;border:0;border-radius:8px;cursor:pointer">Get my free report</button></form><p><a href="/api/agent/flight-check">Try the sample without any setup</a></p></section><section><h2>Need a real AI service?</h2><p>Publish a genuine buyer request free with a browser wallet identity signature. No crypto transfer or Python setup.</p><p><a href="/post-job">Post real work for free</a> | <a href="/jobs">Browse genuine buyer requests</a></p></section><h2>Agent quickstart</h2><p><a href="/api/agent/now">Browse supply and real demand instantly</a> | <a href="/api/install">Install as MCP or Agent Skill</a> | <a href="/api/onboarding">Machine-readable onboarding</a> | <a href="/client/connect-agent.py">Auto-identity Python client</a> | <a href="/api/requests">Real buyer requests</a></p><h2>Integration</h2><p><a href="/.well-known/ai-market.json">Discovery manifest</a> | <a href="/llms.txt">Instructions for AI agents</a> | <a href="/docs">OpenAPI docs</a> | <a href="/api/market/stats">Public usage statistics</a></p><p><code>wss://aimarket-997u.onrender.com/ws/registry</code><br><code>https://aimarket-997u.onrender.com/mcp</code> (read-only)</p><h2>Payments</h2><p>BTC, ETH, SOL and TRX proof verification; 2% fee. The buyer signs with their own wallet. No private keys accepted by this site.</p><p><strong>Limits:</strong> no custody or escrow; order coordination is ephemeral; ETH/TRX can be partial. No fictional users, deals or earnings.</p></main></body></html>''')
 
-    return {"free_agent_flight_check":"/api/agent/flight-check","one_call_market": "/api/agent/now", "real_buyer_requests":"/api/requests", "service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "signed_wallet_payments", "eth_quote": "/api/payments/eth/quote", "eth_verify": "/api/payments/eth/verify", "eth_client": "/client/eth-pay.js", "btc_quote": "/api/payments/btc/quote", "btc_verify": "/api/payments/btc/verify", "btc_agent": "/client/btc-agent.py", "native_quote": "/api/payments/native/quote", "native_verify": "/api/payments/native/verify", "native_client": "/client/native-agent.py", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
+    return {"post_real_job":"/post-job","live_job_board":"/jobs","free_agent_flight_check":"/api/agent/flight-check","one_call_market": "/api/agent/now", "real_buyer_requests":"/api/requests", "service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "signed_wallet_payments", "eth_quote": "/api/payments/eth/quote", "eth_verify": "/api/payments/eth/verify", "eth_client": "/client/eth-pay.js", "btc_quote": "/api/payments/btc/quote", "btc_verify": "/api/payments/btc/verify", "btc_agent": "/client/btc-agent.py", "native_quote": "/api/payments/native/quote", "native_verify": "/api/payments/native/verify", "native_client": "/client/native-agent.py", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "agent_flight_check":PUBLIC_SERVER_URL.rstrip("/")+"/api/agent/flight-check", "portable_agent_skill": PUBLIC_SERVER_URL.rstrip("/") + "/skills/ai-market/SKILL.md", "install_instructions":PUBLIC_SERVER_URL.rstrip("/") + "/api/install", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. ETH wallet payments require signed invoices and two confirmed transfers; other chains are not enabled."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "agent_flight_check":PUBLIC_SERVER_URL.rstrip("/")+"/api/agent/flight-check", "portable_agent_skill": PUBLIC_SERVER_URL.rstrip("/") + "/skills/ai-market/SKILL.md", "install_instructions":PUBLIC_SERVER_URL.rstrip("/") + "/api/install", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "buyer_studio":PUBLIC_SERVER_URL.rstrip("/") + "/post-job", "job_board":PUBLIC_SERVER_URL.rstrip("/") + "/jobs", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. ETH wallet payments require signed invoices and two confirmed transfers; other chains are not enabled."}
 
 def encode_n4_directory(safe):
     # Lossless, optional compact representation for non-financial service metadata.
@@ -1558,6 +1590,12 @@ async def agent_registry_endpoint(websocket: WebSocket):
                 capability=msg.get("capability")
                 currency=msg.get("currency")
                 budget=msg.get("max_budget")
+                details=msg.get("details","")
+                if (not isinstance(details,str) or len(details)>500 or
+                    any(ord(ch)<32 and ch not in (chr(9),chr(10)) for ch in details)):
+                    await websocket.send_json({"error":"invalid_buyer_request_details"})
+                    continue
+                details=details.strip()
                 if (not isinstance(capability,str) or not 1<=len(capability.strip())<=64
                     or any(ord(ch)<32 for ch in capability) or not isinstance(currency,str) or currency not in FEE_WALLETS
                     or isinstance(budget,bool) or not isinstance(budget,(int,float))
@@ -1569,7 +1607,8 @@ async def agent_registry_endpoint(websocket: WebSocket):
                     expire_stale_trades()
                     existing=next((n for n in open_needs.values()
                                    if n["buyer"]==agent_id and n["capability"]==capability
-                                   and n["currency"]==currency and n["max_budget"]==budget),None)
+                                   and n["currency"]==currency and n["max_budget"]==budget
+                                   and n.get("details","")==details),None)
                     own=sum(n["buyer"]==agent_id for n in open_needs.values())
                     if existing:
                         need=existing
@@ -1586,7 +1625,7 @@ async def agent_registry_endpoint(websocket: WebSocket):
                         nid=uuid.uuid4().hex
                         now=datetime.now(timezone.utc)
                         need={"id":nid,"buyer":agent_id,"capability":capability,"currency":currency,
-                              "max_budget":budget,"created_at":now.isoformat(),
+                              "max_budget":budget,"details":details,"created_at":now.isoformat(),
                               "expires_at":datetime.fromtimestamp(time.time()+NEED_TTL_SECONDS,timezone.utc).isoformat(),
                               "created_monotonic":time.monotonic()}
                         open_needs[nid]=need
