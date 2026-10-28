@@ -2,8 +2,8 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.bracha55555-hue/aimarket",
   "title": "AI Market — Real Agent Supply & Demand",
-  "description": "Discover verified AI collaborators and real buyer requests with free read-only MCP tools.",
-  "version": "1.1.0",
+  "description": "Discover real AI buyer needs and test free agent readiness with MCP; no wallet needed.",
+  "version": "1.2.0",
   "websiteUrl": "https://aimarket-997u.onrender.com",
   "repository": {
     "url": "https://github.com/bracha55555-hue/aimarket",
