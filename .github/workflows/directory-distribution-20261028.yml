@@ -1,0 +1,78 @@
+name: One-time free MCP directory submissions (no social media)
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/directory-distribution-20261028.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Submit once to public API directories, disclosing the operator
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request, urllib.error
+          from urllib.parse import quote
+          REPO="https://github.com/bracha55555-hue/aimarket"
+          MCP="https://aimarket-997u.onrender.com/mcp"
+          BLURB="Free real AI agent service discovery and signed, unfunded buyer requests via read-only MCP."
+          UA="AI-Market-directory-submission/1.0 (+https://github.com/bracha55555-hue/aimarket)"
+          def request(method, url, payload=None):
+              data=json.dumps(payload).encode("utf-8") if payload is not None else None
+              headers={"User-Agent":UA, "Accept":"application/json"}
+              if payload is not None: headers["Content-Type"]="application/json"
+              req=urllib.request.Request(url,data=data,headers=headers,method=method)
+              try:
+                  with urllib.request.urlopen(req,timeout=20) as resp:
+                      return resp.status,resp.read(30000).decode("utf-8","replace")
+              except urllib.error.HTTPError as e:
+                  return e.code,e.read(30000).decode("utf-8","replace")
+              except Exception as e:
+                  return 0,str(e)
+          print("SUBMISSION INTENT: user-owned repo, no credentials, no invented demand, no repeat schedule")
+          # Directory explicitly documents public agent JSON submissions.
+          wingman={
+              "name":"AI Market",
+              "kind":"mcp-server",
+              "url":MCP,
+              "repo_url":REPO,
+              "description":"Discover real online AI service offers and genuine identity-signed, unfunded buyer requests via free read-only MCP. Buyers can post real tasks with a wallet identity signature. No escrow or guaranteed work.",
+              "categories":["agents","developer-tools","marketplace"]
+          }
+          wstatus,wbody=request("POST","https://wingmanprotocol.com/submit",wingman)
+          print("DIRECTORY wingmanprotocol HTTP",wstatus,"body",wbody[:2500])
+          # This directory documents an API and a maintainer review queue.
+          harbor_name="io.github.bracha55555-hue/aimarket"
+          check,existing=request("GET","https://ai.mcpharbor.dev/api/v0/servers/"+quote(harbor_name,safe="/"))
+          print("DIRECTORY mcpharbor existing-lookup HTTP",check,"body",existing[:800])
+          if check==200:
+              print("DIRECTORY mcpharbor already indexed; no duplicate submission")
+              hstatus=200
+          elif check==404:
+              harbor={
+                  "name":harbor_name,
+                  "title":"AI Market — Real Agent Supply and Buyer Demand",
+                  "description":BLURB+" Buyer requests have no funds reserved, and listing a service does not prove quality.",
+                  "version":"1.3.0",
+                  "transport":"streamable-http",
+                  "remoteUrl":MCP,
+                  "tools":["agent_flight_check","search_agents","real_buyer_requests","market_in_one_call","marketplace_status","integration_guide"],
+                  "tags":["agents","marketplace","commerce","discovery","mcp"],
+                  "repository":REPO,
+                  "website":"https://aimarket-997u.onrender.com"
+              }
+              hstatus,hbody=request("POST","https://ai.mcpharbor.dev/api/v0/servers",harbor)
+              print("DIRECTORY mcpharbor submission HTTP",hstatus,"body",hbody[:3000])
+          else:
+              hstatus=check
+              print("DIRECTORY mcpharbor lookup unclear; not submitting blindly")
+          # Each target is independent; report status transparently. No retry loop.
+          accepted=(200,201,202,409)
+          if wstatus not in accepted: raise RuntimeError("WingMan submission not confirmed")
+          if hstatus not in accepted: raise RuntimeError("MCPHarbor listing / submission not confirmed")
+          print("DIRECTORY-SUBMISSION-FINISHED; review/public indexing is a separate step.")
+          PY
