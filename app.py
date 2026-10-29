@@ -412,6 +412,8 @@ async def compute_agent_flight_check(capabilities=None,currency="ETH"):
         offers={name:sum(name in [c.casefold() for c in p["capabilities"]]
                          for p in agent_profiles.values() if p.get("identity_verified"))
                 for name in values}
+        offline={name:sum(o["capability"]==name and o["currency"]==currency
+                          for o in signed_offers.values()) for name in values}
     usage_event("flight_checks")
     root=PUBLIC_SERVER_URL.rstrip("/")
     return {
@@ -428,7 +430,10 @@ async def compute_agent_flight_check(capabilities=None,currency="ETH"):
                            if needs else "No matching buyer requests currently observed; do not invent opportunities")
       },
       "live_supply":{"online_verified_agents_by_capability":offers,
-                     "meaning":"Counts of current signed, online agent offers; not guaranteed quality or delivery"},
+                     "signed_offline_offers_by_capability_and_currency":offline,
+                     "offline_available_now":False,
+                     "offline_offers_identity_only":True,
+                     "meaning":"Online counts are live signed connections; offline counts are temporary identity-signed advertisements, NOT currently available agents, skill certification or confirmed delivery"},
       "launch_plan":[
           {"step":1,"action":"Preview your real service profile, edit capability names to what you truly provide",
            "example_profile":{"capabilities":values,"currency":currency,"identity_verified":False}},
