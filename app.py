@@ -229,7 +229,10 @@ async def ai_plugin_manifest():
 
 @app.get("/health")
 async def health_check():
-    async with state_lock: return {"status": "online", "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS, "noncustodial_eth_wallet_payments": True, "noncustodial_btc_atomic_payment": True, "native_sol_trx_quote": True}
+    # Render injects this public Git SHA at runtime. Never expose arbitrary environment data.
+    deploy_sha=os.getenv("RENDER_GIT_COMMIT","")
+    revision=deploy_sha if re.fullmatch(r"[0-9a-f]{40}",deploy_sha) else None
+    async with state_lock: return {"status": "online", "deployed_git_sha":revision, "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS, "noncustodial_eth_wallet_payments": True, "noncustodial_btc_atomic_payment": True, "native_sol_trx_quote": True}
 
 def execute_automated_trade(buyer_private_key: str, seller_address: str, amount_wei: int):
     raise RuntimeError("Legacy private-key custody and non-atomic live transfers are disabled for safety")
@@ -601,7 +604,7 @@ async def public_market_stats():
         pending=sum(t.get("status") in ("pending","delivered","awaiting_payment") for t in active_trades.values())
         proposed=sum(i["status"]=="proposed" for i in purchase_intents.values())
         acknowledged=sum(i["status"]=="accepted" for i in purchase_intents.values())
-    return {"since":usage_started_at,"scope":"current process only; resets on restart/redeploy",
+    return {"since":usage_started_at,"deployed_git_sha":(os.getenv("RENDER_GIT_COMMIT") if re.fullmatch(r"[0-9a-f]{40}",os.getenv("RENDER_GIT_COMMIT","")) else None),"scope":"current process only; resets on restart/redeploy",
             "authenticated_online_agents":connected,"available_service_offers":services,
             "unsettled_orders_in_memory":pending,"open_verified_buyer_requests":len(open_needs),
             "signed_offline_offers":len(signed_offers),
