@@ -23,6 +23,8 @@ jobs:
         run: python -m unittest -v test_signed_multi_offers.py
       - name: Verify discoverable signed supplier offers and honest buyer filters
         run: python -m unittest -v test_genuine_discovery.py
+      - name: Verify two independently signed genuine purchase intents, replay resistance and N4 restore
+        run: python -m unittest -v test_purchase_intents.py
       - name: Verify signed MCP seller offer without WebSocket or server-side keys
         run: |
           python - <<'PY'
