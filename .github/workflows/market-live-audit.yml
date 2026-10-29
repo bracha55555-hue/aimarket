@@ -63,6 +63,20 @@ jobs:
                   "contains_real_market_snapshot":"Live marketplace snapshot" in body}
           except (OSError,ValueError,TimeoutError) as exc:
               result["production_homepage"]={"error":type(exc).__name__}
+          # Read-only confirmation of actual deployed two-sided browser funnel; never create orders.
+          result["production_browser_funnel"]={}
+          for page,needle in (("/post-job","buyer-matches"),
+                              ("/list-service","id=\"provider\""),
+                              ("/seller-inbox","Review real buyer proposals")):
+              try:
+                  req=urllib.request.Request(base+page,headers={
+                      "User-Agent":"AI-Market-Official-Business-Audit/1.0","Accept":"text/html"})
+                  with urllib.request.urlopen(req,timeout=20) as response:
+                      body=response.read(160000).decode("utf-8","replace")
+                  result["production_browser_funnel"][page]={"status":"online",
+                      "feature_visible":needle in body}
+              except (OSError,ValueError,TimeoutError) as exc:
+                  result["production_browser_funnel"][page]={"error":type(exc).__name__}
           stats,error=fetch(base+"/api/market/stats")
           if stats:
               e=stats.get("events_since_start") or {}
