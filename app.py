@@ -67,7 +67,7 @@ if not logger.handlers:
     logger.addHandler(_usage_handler)
 logger.propagate = False
 usage_started_at = datetime.now(timezone.utc).isoformat()
-usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0, "buyer_studio_views":0, "signed_offers_published":0}
+usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0, "buyer_studio_views":0, "signed_offers_published":0, "intent_proposals_published":0, "intent_acceptances":0}
 def usage_event(kind):
     # Counts are process-local and contain NO wallet address, private key or IP.
     if kind in usage_events:
@@ -597,10 +597,14 @@ async def public_market_stats():
         connected=len(active_agents)
         services=sum(len(p.get("capabilities",[])) for p in agent_profiles.values())
         pending=sum(t.get("status") in ("pending","delivered","awaiting_payment") for t in active_trades.values())
+        proposed=sum(i["status"]=="proposed" for i in purchase_intents.values())
+        acknowledged=sum(i["status"]=="accepted" for i in purchase_intents.values())
     return {"since":usage_started_at,"scope":"current process only; resets on restart/redeploy",
             "authenticated_online_agents":connected,"available_service_offers":services,
             "unsettled_orders_in_memory":pending,"open_verified_buyer_requests":len(open_needs),
-            "signed_offline_offers":len(signed_offers),"events_since_start":dict(usage_events),
+            "signed_offline_offers":len(signed_offers),
+            "unsigned_payments_claimed":False,"nonbinding_intents_proposed":proposed,
+            "nonbinding_intents_accepted":acknowledged,"events_since_start":dict(usage_events),
             "note":"Event counts are not unique customers or confirmed revenue."}
 
 @app.get("/client/connect-agent.py")
@@ -739,7 +743,7 @@ async def mcp_public_well_known():
     return {"name":"io.github.bracha55555-hue/aimarket",
             "title":"AI Market — Real Agent Supply & Demand",
             "description":"Public read-only MCP discovery of real AI service offers and identity-signed but unfunded buyer needs.",
-            "version":"1.4.0",
+            "version":"1.5.0",
             "protocol":"mcp","transport":"streamable-http",
             "url":base+"/mcp","repository":"https://github.com/bracha55555-hue/aimarket",
             "free_discovery":True,"escrow":False,"a2a_protocol_supported":False}
@@ -1046,6 +1050,7 @@ async def handle_purchase_intent(name,args):
             if n4_store is not None: n4_store.put("intent",ident,record,terms["seller"],terms["currency"],expiry)
             purchase_intents[ident]=record
             used_intent_proofs[proof]=fields["challenge_expires_at"]
+            usage_event("intent_proposals_published")
             return {"published":True,"intent":public_purchase_intent(record),"seller_accepted":False,
                     "payment_verified":False,"funds_reserved":False,"order_created":False}
     if name=="browse_purchase_intents":
@@ -1095,6 +1100,7 @@ async def handle_purchase_intent(name,args):
             if n4_store is not None: n4_store.put("intent",item["id"],record,item["seller"],item["currency"],record["expires_at_unix"])
             purchase_intents[item["id"]]=record
             used_intent_proofs[proof]=fields["challenge_expires_at"]
+            usage_event("intent_acceptances")
             return {"accepted":True,"intent":public_purchase_intent(record),"two_identities_signed":True,
                     "binding_order":False,"payment_verified":False,"funds_reserved":False,"escrow":False,
                     "next_step":"Agree on delivery and independently verify the chain-specific payment proof."}
@@ -1155,7 +1161,7 @@ async def legacy_mcp_request(request, msg):
         return {"jsonrpc":"2.0","id":request_id,"result":{
             "protocolVersion":negotiated,
             "capabilities":{"tools":{"listChanged":False}},
-            "serverInfo":{"name":"AI Market","version":"1.4.0"},
+            "serverInfo":{"name":"AI Market","version":"1.5.0"},
             "instructions":"Read-only discovery is free. Signed offer tools require local EIP-191 signature and caller consent; no escrow, guarantee or assured buyer funds."}}
     header_version=request.headers.get("mcp-protocol-version")
     if header_version and header_version not in LEGACY_MCP_VERSIONS:
@@ -1245,7 +1251,7 @@ async def ai_catalog_discovery():
 @app.get("/mcp/server-card")
 async def mcp_server_card():
     base=PUBLIC_SERVER_URL.rstrip("/")
-    return {"name":"AI Market","version":"1.4.0","url":base+"/mcp",
+    return {"name":"AI Market","version":"1.5.0","url":base+"/mcp",
             "transport":"streamable-http","supportedVersions":[MCP_VERSION,*LEGACY_MCP_VERSIONS],
             "authentication":"none for read-only queries",
             "tools":[tool["name"] for tool in MCP_TOOL_DEFINITIONS]}
@@ -1369,7 +1375,7 @@ async def mcp_endpoint(request: Request):
     else:
         return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32601, "message": "Method not found"}}, status_code=404)
     usage_event("mcp_calls")
-    result["_meta"] = {"io.modelcontextprotocol/serverInfo": {"name": "AI-Market", "version": "1.4.0"}}
+    result["_meta"] = {"io.modelcontextprotocol/serverInfo": {"name": "AI-Market", "version": "1.5.0"}}
     return JSONResponse({"jsonrpc": "2.0", "id": request_id, "result": result}, headers={"Cache-Control": "no-store" if method == "tools/call" else "public, max-age=300"})
 
 
