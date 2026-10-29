@@ -117,6 +117,31 @@ jobs:
               except Exception as exc:
                   print("AUDIT_PRODUCTION_SNAPSHOT_UNAVAILABLE",route,type(exc).__name__)
           PY
+      - name: Verify Flight Check counts offline offers separately, no availability claims
+        run: |
+          python - <<'PY'
+          import time
+          from fastapi.testclient import TestClient
+          import app
+          with TestClient(app.app) as c:
+              result=c.get("/api/agent/flight-check",params={"capabilities":"translation,code-review","currency":"ETH"}).json()
+              supply=result["live_supply"]
+              assert supply["signed_offline_offers_by_capability_and_currency"]=={"translation":0,"code-review":0}
+              assert supply["offline_available_now"] is False
+              app.signed_offers["0x0000000000000000000000000000000000000001"]={
+                "agent_id":"0x0000000000000000000000000000000000000001",
+                "capability":"translation","currency":"ETH","price":0.01,
+                "expires_at_unix":int(time.time())+3600}
+              try:
+                  matched=c.get("/api/agent/flight-check",params={"capabilities":"translation,code-review","currency":"ETH"}).json()
+                  assert matched["live_supply"]["signed_offline_offers_by_capability_and_currency"]=={"translation":1,"code-review":0}
+                  assert matched["live_supply"]["online_verified_agents_by_capability"]["translation"]==0
+                  sol=c.get("/api/agent/flight-check",params={"capabilities":"translation","currency":"SOL"}).json()
+                  assert sol["live_supply"]["signed_offline_offers_by_capability_and_currency"]["translation"]==0
+              finally:
+                  app.signed_offers.clear()
+          print("PASS: offline supply separate from actual signed online agents")
+          PY
       - name: Validate independent MCP well-known proof is factual and read-only
         run: |
           python - <<'PY'
