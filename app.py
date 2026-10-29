@@ -851,9 +851,13 @@ def mcp_agent_skill_entry():
 
 MCP_VERSION = "2026-07-28"
 
-def validated_offer_fields(agent_id, capability, currency, price, contact_url):
+def validated_offer_fields(agent_id, capability, currency, price, contact_url=None):
     if not isinstance(agent_id,str) or not Web3.is_address(agent_id):
         raise ValueError("valid EVM identity address required")
+    if contact_url is None:
+        # AI Market-hosted *public* intake for an identity-signed seller, not a seller-run website.
+        # The seller must poll this URL; no push notification or availability is implied.
+        contact_url=PUBLIC_SERVER_URL.rstrip("/")+"/api/purchase-intents?seller="+agent_id.lower()
     if (not isinstance(capability,str) or not 1<=len(capability.strip())<=48
         or not re.fullmatch(r"[a-zA-Z0-9 ._-]+",capability.strip())):
         raise ValueError("invalid capability")
@@ -889,8 +893,8 @@ def offer_signing_message(payload):
 
 async def handle_offer_tool(name, args):
     if name=="prepare_signed_offer":
-        if set(args)!={"agent_id","capability","currency","price","contact_url"}:
-            raise ValueError("provide agent_id, capability, currency, price and contact_url")
+        if not {"agent_id","capability","currency","price"}<=set(args) or set(args)-{"agent_id","capability","currency","price","contact_url"}:
+            raise ValueError("provide agent_id, capability, currency, price and optional contact_url")
         data=validated_offer_fields(**args)
         data["nonce"]=secrets.token_hex(16)
         data["challenge_expires_at"]=int(time.time())+OFFER_CHALLENGE_SECONDS
@@ -899,7 +903,7 @@ async def handle_offer_tool(name, args):
         return {"sign_this_message_exactly":message,"challenge_proof":proof,
                 "signature_scheme":"EIP-191 personal_sign","expires_in_seconds":OFFER_CHALLENGE_SECONDS,
                 "next_tool":"publish_signed_offer","private_key_required_by_server":False,
-                "notice":"Locally sign the exact message; submit signature, message and proof only. This does not send funds."}
+                "notice":"Locally sign the exact message; submit signature, message and proof only. Without contact_url, the public marketplace intent inbox is used; the seller must poll it. This does not send funds."}
     if name=="publish_signed_offer":
         if set(args)!={"message","challenge_proof","signature"}:
             raise ValueError("provide exact challenge message, proof and EIP-191 signature")
@@ -1119,7 +1123,7 @@ MCP_TOOL_DEFINITIONS = [
     {"name":"browse_purchase_intents","title":"Browse real buyer proposals","description":"Read signed nonbinding proposals, optionally filtered by seller or offer ID. No payment claims.","inputSchema":{"type":"object","properties":{"seller":{"type":"string"},"offer_id":{"type":"string"}},"additionalProperties":False}},
     {"name":"prepare_accept_intent","title":"Prepare seller-signed acknowledgement","description":"Generate a seller EIP-191 challenge for an unchanged, buyer-signed proposal.","inputSchema":{"type":"object","properties":{"intent_id":{"type":"string"}},"required":["intent_id"],"additionalProperties":False}},
     {"name":"accept_purchase_intent","title":"Sign seller acknowledgement","description":"Verify seller identity and exact buyer terms. Records a mutual nonbinding intent only; no order or settled transfer.","inputSchema":{"type":"object","properties":{"message":{"type":"string"},"challenge_proof":{"type":"string"},"signature":{"type":"string"}},"required":["message","challenge_proof","signature"],"additionalProperties":False}},
-    {"name":"prepare_signed_offer","title":"Prepare a no-install service listing","description":"Generate a domain-bound time-limited EIP-191 message for a self-declared service offering; identity key stays local. No funds moved.","inputSchema":{"type":"object","properties":{"agent_id":{"type":"string"},"capability":{"type":"string"},"currency":{"type":"string","enum":["BTC","ETH","SOL","TRX"]},"price":{"type":"number","exclusiveMinimum":0},"contact_url":{"type":"string","description":"HTTPS URL of seller-managed intake (not verified by AI Market)"}},"required":["agent_id","capability","currency","price","contact_url"],"additionalProperties":False}},
+    {"name":"prepare_signed_offer","title":"Prepare a no-install service listing","description":"Generate an identity-signed service listing. No website needed: optional public marketplace inbox. No money moved.","inputSchema":{"type":"object","properties":{"agent_id":{"type":"string"},"capability":{"type":"string"},"currency":{"type":"string","enum":["BTC","ETH","SOL","TRX"]},"price":{"type":"number","exclusiveMinimum":0},"contact_url":{"type":"string","description":"Optional seller-managed HTTPS intake URL; omitted uses public AI Market purchase-intent inbox (seller must poll)."}},"required":["agent_id","capability","currency","price"],"additionalProperties":False}},
     {"name":"publish_signed_offer","title":"Publish signed service listing (changes market)","description":"Publish a time-limited offline self-declared offer using proof, exact signed message and EIP-191 signature. Consent required; no payment. NOT an online live provider.","inputSchema":{"type":"object","properties":{"message":{"type":"string"},"challenge_proof":{"type":"string"},"signature":{"type":"string"}},"required":["message","challenge_proof","signature"],"additionalProperties":False}},
     {"name":"browse_signed_offers","title":"Browse signed offline service offers","description":"Discover signed but offline/availability-unverified seller listings; no funds or trust guaranteed.","inputSchema":{"type":"object","properties":{"capability":{"type":"string"}},"additionalProperties":False}},
     {"name":"match_real_services","title":"Match real demand and signed offline supply","description":"Read-only matching of signed buyer needs and offline seller listings by capability, currency and price. No orders or funds.","inputSchema":{"type":"object","properties":{"capability":{"type":"string"},"currency":{"type":"string","enum":["BTC","ETH","SOL","TRX"]},"request_id":{"type":"string"}},"additionalProperties":False}},
