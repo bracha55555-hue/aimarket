@@ -1,0 +1,99 @@
+name: Verify AI Market live adoption and official registry
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - app.py
+      - server.json
+      - .github/workflows/market-live-audit.yml
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  live-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Read-only production, onboarding and registry verification
+        run: |
+          python - <<'PY'
+          import json
+          import urllib.request
+          import urllib.error
+          import urllib.parse
+
+          base="https://aimarket-997u.onrender.com"
+          registry="https://registry.modelcontextprotocol.io/v0.1/servers/"
+          expected=json.load(open("server.json",encoding="utf-8"))["version"]
+          name="io.github.bracha55555-hue/aimarket"
+          result={"expected_registry_version":expected,
+                  "scope":"Read-only external snapshot; process counters reset at server restart",
+                  "private_keys_used":False,"payments_sent":False}
+
+          def fetch(url, data=None, headers=None):
+              h={"User-Agent":"AI-Market-Official-Business-Audit/1.0",
+                 "Accept":"application/json",**(headers or {})}
+              req=urllib.request.Request(url,data=data,headers=h,method="POST" if data else "GET")
+              try:
+                  with urllib.request.urlopen(req,timeout=20) as response:
+                      return json.load(response),None
+              except urllib.error.HTTPError as exc:
+                  return None,f"HTTP_{exc.code}"
+              except (OSError,ValueError,TimeoutError) as exc:
+                  return None,type(exc).__name__
+
+          health,error=fetch(base+"/health")
+          result["production_health"]={"status":health.get("status"),"escrow":health.get("escrow")} if health else {"error":error}
+          stats,error=fetch(base+"/api/market/stats")
+          if stats:
+              e=stats.get("events_since_start") or {}
+              result["production_market"]={
+                  "since":stats.get("since"),"online_agents":stats.get("authenticated_online_agents"),
+                  "offline_signed_offers":stats.get("signed_offline_offers"),
+                  "buyer_requests":stats.get("open_verified_buyer_requests"),
+                  "nonbinding_proposals":stats.get("nonbinding_intents_proposed"),
+                  "nonbinding_acknowledgements":stats.get("nonbinding_intents_accepted"),
+                  "chain_settlements_verified":e.get("settlements_verified"),
+                  "new_buyer_requests_since_restart":e.get("requests_published")}
+          else:
+              result["production_market"]={"error":error}
+          metadata,error=fetch(base+"/.well-known/mcp.json")
+          result["production_mcp"]={"version":metadata.get("version"),
+                                    "url":metadata.get("url")} if metadata else {"error":error}
+          # List available MCP tools WITHOUT running any of them or signing a transaction.
+          params={"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28",
+                           "io.modelcontextprotocol/clientCapabilities":{}}}
+          body=json.dumps({"jsonrpc":"2.0","id":1,"method":"tools/list","params":params}).encode()
+          response,error=fetch(base+"/mcp",body,{
+              "Content-Type":"application/json","Accept":"application/json, text/event-stream",
+              "MCP-Protocol-Version":"2026-07-28","Mcp-Method":"tools/list"})
+          if response and "result" in response:
+              listed=response["result"].get("tools",[])
+              seller=next((t for t in listed if t.get("name")=="prepare_signed_offer"),{})
+              required=seller.get("inputSchema",{}).get("required",[])
+              result["production_seller_onboarding"]={
+                  "tool_present":bool(seller),
+                  "website_not_required":bool(seller and "contact_url" not in required),
+                  "required_fields":required,
+                  "intents_supported":all(t in {tool.get("name") for tool in listed} for t in
+                      ("prepare_purchase_intent","publish_purchase_intent","accept_purchase_intent"))}
+          else:
+              result["production_seller_onboarding"]={"error":error or (response or {}).get("error")}
+          url=(registry+urllib.parse.quote(name,safe="")+"/versions/latest")
+          record,error=fetch(url)
+          if record:
+              server=record.get("server",record)
+              result["official_registry"]={"available":True,"name":server.get("name"),
+                  "latest_version":server.get("version"),
+                  "version_matches_manifest":server.get("version")==expected}
+          else:
+              result["official_registry"]={"available":False,"error":error}
+          print("AI_MARKET_VERIFIABLE_BUSINESS_AUDIT",json.dumps(result,sort_keys=True))
+          print("Important: these are read-only observations, not unique user counts or proven lifetime revenue.")
+          PY
