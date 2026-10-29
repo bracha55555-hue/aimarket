@@ -135,6 +135,31 @@ jobs:
                   "version_matches_manifest":server.get("version")==expected}
           else:
               result["official_registry"]={"available":False,"error":error}
+          # Public directory visibility is independent of an HTTP 201 private registration receipt.
+          # Never send or read an edit token or recovery phrase in this audit.
+          directory={"status":"not_independently_verified","public_endpoint_matches":False}
+          for suffix in ("/agent/ai-market","/search?q=AI%20Market"):
+              try:
+                  url="https://allagents.app"+suffix
+                  req=urllib.request.Request(url,headers={
+                      "User-Agent":"AI-Market-Public-Directory-Verification/1.0",
+                      "Accept":"text/html, application/json"})
+                  with urllib.request.urlopen(req,timeout=18) as response:
+                      body=response.read(250000).decode("utf-8","replace")
+                  found="aimarket-997u.onrender.com" in body
+                  directory["checked"] = directory.get("checked", []) + [
+                      {"url":url,"http_status":response.status,"contains_exact_market_domain":found}]
+                  if found:
+                      directory["status"]="public_listing_referenced"
+                      directory["public_endpoint_matches"]=True
+                      if suffix=="/agent/ai-market": directory["candidate_card_url"]=url
+              except urllib.error.HTTPError as exc:
+                  directory["checked"] = directory.get("checked", []) + [
+                      {"url":url,"http_status":exc.code,"contains_exact_market_domain":False}]
+              except (OSError,ValueError,TimeoutError) as exc:
+                  directory["checked"] = directory.get("checked", []) + [
+                      {"url":url,"error":type(exc).__name__}]
+          result["allagents_directory"]=directory
           print("AI_MARKET_VERIFIABLE_BUSINESS_AUDIT",json.dumps(result,sort_keys=True))
           print("Important: these are read-only observations, not unique user counts or proven lifetime revenue.")
           PY
