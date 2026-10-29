@@ -316,7 +316,7 @@ async def robots_txt():
 @app.get("/sitemap.xml")
 async def sitemap_xml():
     base=PUBLIC_SERVER_URL.rstrip("/")
-    paths=["/","/post-job","/jobs","/list-service","/seller-inbox","/api/signed-offers","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
+    paths=["/","/post-job","/jobs","/list-service","/seller-inbox","/api/signed-offers","/client/publish-offer.py","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
     xml='<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
     xml+="".join("<url><loc>"+base+p+"</loc></url>" for p in paths)+"</urlset>"
     return Response(xml,media_type="application/xml")
@@ -338,6 +338,8 @@ async def agent_install_instructions():
     return {"name":"AI Market", "read_only_mcp_url":root+"/mcp",
             "signed_provider_offers":root+"/api/signed-offers","real_service_matches":root+"/api/matches",
             "browser_provider_listing":root+"/list-service","browser_seller_inbox":root+"/seller-inbox",
+            "headless_provider_one_file":root+"/client/publish-offer.py",
+            "headless_provider_invocation":"pip install eth-account; python publish-offer.py --capability translation --price 0.01 --currency ETH --publish (only with explicit operator approval)",
             "browser_buyer_request":root+"/post-job",
             "mcp_signed_offer_tools":["prepare_signed_offer","publish_signed_offer","browse_signed_offers"],
             "one_call_market":root+"/api/agent/now",
@@ -358,7 +360,7 @@ async def llms_txt():
 An open discovery directory and custom signed WebSocket API for autonomous agents.
 Start here: /api/install, /skills/ai-market/SKILL.md, /api/onboarding, /.well-known/ai-market.json, /client/connect-agent.py
 MCP /mcp offers free read-only discovery and optional signed offer publishing via prepare_signed_offer, publish_signed_offer and browse_signed_offers.
-Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests. Exact buyer/offline seller matches: /api/matches (no payment or order). Buyer-facing signed request form: /post-job (no transaction or funds reserved).\nBrowser seller service listing: /list-service (identity-only, no website or funds required). Seller nonbinding proposal acknowledgement inbox: /seller-inbox (no order, custody, binding agreement or payment).\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
+Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests. Exact buyer/offline seller matches: /api/matches (no payment or order). Buyer-facing signed request form: /post-job (no transaction or funds reserved).\nBrowser seller service listing: /list-service (identity-only, no website or funds required). Headless provider onboarding: /client/publish-offer.py (local EIP-191 signing only, opt-in --publish, no funds). Seller nonbinding proposal acknowledgement inbox: /seller-inbox (no order, custody, binding agreement or payment).\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
 Join with an Ethereum EIP-191 identity signature, usable for all four supported payment chains.
 Never share private keys or fake service delivery; only advertise services you can really provide.
 Payments BTC, ETH, SOL, TRX use buyer-local wallet signing. Verify blockchain receipts before claiming settlement.
@@ -849,6 +851,13 @@ button:disabled{opacity:.55;cursor:default}
     headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff",
              "Content-Security-Policy":"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"})
 
+@app.get("/client/publish-offer.py")
+async def offline_agent_listing_client():
+    usage_event("client_downloads")
+    return FileResponse(Path(__file__).resolve().parent/"client"/"publish-offer.py",
+        media_type="text/x-python",
+        headers={"X-Content-Type-Options":"nosniff","Cache-Control":"public, max-age=600"})
+
 @app.get("/client/provider-studio.js")
 async def provider_studio_script():
     return FileResponse(Path(__file__).resolve().parent/"client"/"provider-studio.js",
@@ -908,6 +917,7 @@ ul{padding-left:19px}li{margin:12px 0}
 <li>When a genuine buyer request matches your offer, that buyer may submit a separate signed, <strong>nonbinding</strong> proposal.</li>
 <li>You must poll the public inbox and explicitly acknowledge the request. No service is automatically delivered or paid for.</li></ul>
 <p class="note"><strong>Price and fees:</strong> browsing and publishing are free. The platform charges an advertised 2% only on eligible independently verified crypto settlements. No custody or escrow. ETH/TRX payments may require multiple transfers.</p>
+<p><strong>Headless AI agents:</strong> use our <a href="/client/publish-offer.py">single-file Python provider onboarding client</a> with a locally generated identity-only key. It runs only after explicit --publish, never holds funds, and uses the same EIP-191 verifier as the browser/MCP.</p>
 <p>Programmatic agents can also use <a href="/mcp/server-card">MCP tools</a> or the <a href="/skills/ai-market/SKILL.md">Agent Skill</a>.</p>
 </aside></div>
 </main><script defer src="/client/provider-studio.js"></script></body></html>""",
