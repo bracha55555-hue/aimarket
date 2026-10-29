@@ -1,0 +1,80 @@
+name: One-time honest AI Market listing to ALLAGENTS
+on:
+  push:
+    branches:
+      - marketing/allagents-one-off-20261029
+permissions:
+  contents: read
+jobs:
+  register:
+    if: github.ref == 'refs/heads/marketing/allagents-one-off-20261029'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install encryption primitive (no API credentials)
+        run: python -m pip install cryptography
+      - name: Register one honest MCP service; encrypt full registration receipt before logging
+        run: |
+          python - <<'PY'
+          import json,urllib.request,urllib.error,base64,secrets
+          from cryptography.hazmat.primitives.serialization import load_pem_public_key
+          from cryptography.hazmat.primitives.asymmetric import padding
+          from cryptography.hazmat.primitives.hashes import SHA256
+          from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+          public_key = load_pem_public_key("-----BEGIN PUBLIC KEY-----\nMIIBojANBgkqhkiG9w0BAQEFAAOCAY8AMIIBigKCAYEA36qamuy5970/5WG8PyL8\nbTd4WZijIzjkbMBqqRY5S294ZVJfOKvOzwnw0XvzaMn1L6GvZLNgfc0eBw1YZNnH\n7JbIIlsNzyXIIfxPt8rwn3WsM1mZvf4HbADhKBdms9ymeiRZ2yHuQmV4THGKHVby\nbhQ4+DWtRBAeaG9MGjkCyY9TpJRHXdPTcseUKN0oBvw2uXwAu+dQiyMWZwYyWUNy\nBTN0r4iLM3SclboHBAnxqmjA6KuSahZCmrBuSkSWa37BL8HTg2SWuF+Kga7RJoKo\n2MlEvnB2vIOLyTG87pF1xqXKGhSmSwnza0oxJNtWBRyci14sFkVx04clN4jjkYj7\nQex7h5STc5Ed2wjxS7PMMj7qYIAPmYYY595Un0vktHGse9N++NcTWBElNPmf+bbq\nyYLhFaLBP3zmCSuIM/cWkyllq3c23VSxqnQbc1MPHohStn/NJJfOOfezojAYP13D\nWiK8cAAPv5j1EqOzPEQ6G6PNiQ5ljEqFvyaHphXB3jkDAgMBAAE=\n-----END PUBLIC KEY-----".encode("ascii"))
+          payload = {
+            "name": "AI Market",
+            "specialty": "commerce",
+            "description": ("Public remote MCP marketplace for genuine identity-signed AI agent services "
+              "and unfunded buyer requests, matching and voluntary nonbinding proposals. "
+              "Crypto-only 2% fee on eligible independently verified settlements. "
+              "Real participants may be zero; no custody, escrow, guaranteed earnings or delivery."),
+            "endpoints": {
+              "mcp": "https://aimarket-997u.onrender.com/mcp",
+              "site": "https://aimarket-997u.onrender.com"
+            },
+            "protocols": ["MCP"],
+            "tags": ["agent-marketplace", "mcp", "commerce", "crypto"]
+          }
+          request=urllib.request.Request(
+              "https://allagents.app/register",
+              data=json.dumps(payload,separators=(",",":"),ensure_ascii=True).encode("utf-8"),
+              headers={"Content-Type":"application/json",
+                       "Accept":"application/json",
+                       "User-Agent":"AI-Market-Owner-One-Time-Listing/1.0"},
+              method="POST")
+          try:
+              with urllib.request.urlopen(request,timeout=40) as resp:
+                  http_status=resp.status
+                  raw=resp.read(64000)
+          except urllib.error.HTTPError as exc:
+              # Never print third-party error bodies: the endpoint might echo registration data.
+              print("ALLAGENTS_REGISTRATION_HTTP_ERROR",exc.code)
+              raise SystemExit(1)
+          except (OSError,TimeoutError) as exc:
+              print("ALLAGENTS_REGISTRATION_NETWORK_ERROR",type(exc).__name__)
+              raise SystemExit(1)
+          try:
+              receipt=json.loads(raw)
+          except (ValueError,UnicodeError):
+              print("ALLAGENTS_REGISTRATION_UNEXPECTED_RESPONSE",http_status)
+              raise SystemExit(1)
+          # Encrypt every byte of response (including edit tokens/recovery), using RSA-OAEP + AES-256-GCM.
+          # Only ciphertext appears in public GitHub logs. The RSA private key never entered GitHub.
+          raw_bytes=json.dumps(receipt,separators=(",",":"),ensure_ascii=True).encode()
+          key=secrets.token_bytes(32)
+          nonce=secrets.token_bytes(12)
+          enc=AESGCM(key).encrypt(nonce,raw_bytes,None)
+          key_enc=public_key.encrypt(key,padding.OAEP(mgf=padding.MGF1(SHA256()),algorithm=SHA256(),label=None))
+          bundle={"format":"AI-Market-ALLAGENTS-RSA-OAEP-SHA256-AES256GCM-v1",
+                  "wrapped_key":base64.b64encode(key_enc).decode(),
+                  "nonce":base64.b64encode(nonce).decode(),
+                  "ciphertext":base64.b64encode(enc).decode()}
+          print("AI_MARKET_ALLAGENTS_PRIVATE_RECEIPT_ENCRYPTED",json.dumps(bundle,separators=(",",":")))
+          # Independent success: non-2xx errors handled above; existence of record must be checked later.
+          print("ALLAGENTS_REGISTRATION_HTTP",http_status,"response_encrypted",True)
+          PY
