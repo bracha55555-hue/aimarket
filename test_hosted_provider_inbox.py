@@ -1,5 +1,6 @@
 import unittest
 from fastapi.testclient import TestClient
+from unittest.mock import patch
 from eth_account import Account
 from eth_account.messages import encode_defunct
 import app as m
@@ -9,7 +10,8 @@ class HostedProviderInboxTest(unittest.TestCase):
         seller,buyer=Account.create(),Account.create()
         hdr={"accept":"application/json, text/event-stream","content-type":"application/json",
              "mcp-protocol-version":"2025-11-25"}
-        with TestClient(m.app) as c:
+        # Production provides HTTPS via RENDER_EXTERNAL_URL. Local test defaults to http://localhost.
+        with patch.object(m,"PUBLIC_SERVER_URL","https://aimarket-997u.onrender.com"), TestClient(m.app) as c:
             def tool(name,args):
                 return c.post("/mcp",headers=hdr,json={"jsonrpc":"2.0","id":31,"method":"tools/call",
                     "params":{"name":name,"arguments":args}})
