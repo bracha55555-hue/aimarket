@@ -17,6 +17,8 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt httpx
       - run: python -m py_compile app.py
+      - name: Verify production deployment SHA is a bounded public Git commit and no secrets leak
+        run: python -m unittest -v test_deploy_revision.py
       - name: Verify Glama official GitHub publisher identity metadata
         run: |
           python - <<'PY'
