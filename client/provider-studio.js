@@ -75,7 +75,7 @@
         " advertises " + String(listing.capability) + " for " + String(listing.price) +
         " " + String(listing.currency) + ".";
       const inbox = $("inbox");
-      const url = new URL("/api/purchase-intents",location.origin);
+      const url = new URL("/seller-inbox",location.origin);
       url.searchParams.set("seller",String(listing.agent_id || agent_id));
       inbox.href = url.pathname + url.search;
       $("result").hidden = false;
