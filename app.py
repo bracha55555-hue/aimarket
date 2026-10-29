@@ -9,6 +9,7 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import JSONResponse, Response, HTMLResponse, FileResponse
 from pathlib import Path
+from n4store import N4Store
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 from typing import Dict, Literal, Optional
@@ -68,6 +69,23 @@ def usage_event(kind):
         usage_events[kind] += 1
         logger.info("AIMARKET_USAGE type=%s count=%d",kind,usage_events[kind])
 
+# Storage is opt-in. A free Render instance has an ephemeral filesystem:
+# a local file survives process restarts but NOT a new host or redeployment.
+_n4_path=os.getenv("AIMARKET_N4_PATH")
+n4_store=N4Store(_n4_path) if _n4_path else None
+
+def restore_n4_records():
+    if n4_store is None: return
+    n4_store.purge()
+    now=time.time()
+    for nid,need in n4_store.scan("need",now=now).items():
+        remaining=datetime.fromisoformat(need["expires_at"]).timestamp()-now
+        if remaining>0:
+            need["created_monotonic"]=time.monotonic()-(NEED_TTL_SECONDS-remaining)
+            open_needs[nid]=need
+    for ident,offer in n4_store.scan("offer",now=now).items():
+        signed_offers[ident]=offer
+
 state_lock = asyncio.Lock()
 
 class TradeTransaction(BaseModel):
@@ -91,9 +109,11 @@ def expire_stale_trades(now=None):
     for nid, need in list(open_needs.items()):
         if current >= need["created_monotonic"] + NEED_TTL_SECONDS:
             open_needs.pop(nid, None)
+            if n4_store is not None: n4_store.delete("need",nid)
     for ident, offer in list(signed_offers.items()):
         if time.time() >= offer["expires_at_unix"]:
             signed_offers.pop(ident,None)
+            if n4_store is not None: n4_store.delete("offer",ident)
     for proof, expires in list(used_offer_proofs.items()):
         if time.time() >= expires: used_offer_proofs.pop(proof,None)
     return len(expired)
@@ -162,6 +182,7 @@ async def autonomous_seller_agent(agent_id: str, cap_offered: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    restore_n4_records()
     asyncio.create_task(keep_alive_worker())
     asyncio.create_task(global_discovery_broadcaster())
     asyncio.create_task(stale_order_reaper())
@@ -855,6 +876,15 @@ async def handle_offer_tool(name, args):
                 raise ValueError("listing capacity reached")
             used_offer_proofs[proof]=payload["challenge_expires_at"]
             signed_offers[data["agent_id"]]={**data,"expires_at_unix":int(time.time())+OFFER_TTL_SECONDS}
+            if n4_store is not None:
+                record=signed_offers[data["agent_id"]]
+                try:
+                    n4_store.put("offer",data["agent_id"],record,
+                                 record["capability"],record["currency"],record["expires_at_unix"])
+                except Exception:
+                    signed_offers.pop(data["agent_id"],None)
+                    used_offer_proofs.pop(proof,None)
+                    raise
             row=dict(signed_offers[data["agent_id"]])
         usage_event("signed_offers_published")
         return {"published":True,"listing":row,"expires_in_seconds":OFFER_TTL_SECONDS,
@@ -1850,6 +1880,13 @@ async def agent_registry_endpoint(websocket: WebSocket):
                               "max_budget":budget,"details":details,"created_at":now.isoformat(),
                               "expires_at":datetime.fromtimestamp(time.time()+NEED_TTL_SECONDS,timezone.utc).isoformat(),
                               "created_monotonic":time.monotonic()}
+                        if n4_store is not None:
+                            try:
+                                n4_store.put("need",nid,need,capability,currency,
+                                  datetime.fromisoformat(need["expires_at"]).timestamp())
+                            except Exception:
+                                await websocket.send_json({"error":"storage_unavailable"})
+                                continue
                         open_needs[nid]=need
                         alert=[conn for seller,conn in active_agents.items()
                                if seller!=agent_id and capability in agent_profiles.get(seller,{}).get("capabilities",[])]
@@ -1868,6 +1905,11 @@ async def agent_registry_endpoint(websocket: WebSocket):
                 async with state_lock:
                     item=open_needs.get(nid) if isinstance(nid,str) else None
                     if item and item["buyer"]==agent_id:
+                        if n4_store is not None:
+                            try: n4_store.delete("need",nid)
+                            except Exception:
+                                await websocket.send_json({"error":"storage_unavailable"})
+                                continue
                         open_needs.pop(nid,None)
                         removed=True
                     else:
