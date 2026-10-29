@@ -25,6 +25,8 @@ jobs:
         run: python -m unittest -v test_genuine_discovery.py
       - name: Verify two independently signed genuine purchase intents, replay resistance and N4 restore
         run: python -m unittest -v test_purchase_intents.py
+      - name: Verify a provider without a website can receive genuinely signed buyer proposals
+        run: python -m unittest -v test_hosted_provider_inbox.py
       - name: Verify signed MCP seller offer without WebSocket or server-side keys
         run: |
           python - <<'PY'
