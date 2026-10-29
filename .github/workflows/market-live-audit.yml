@@ -88,6 +88,7 @@ jobs:
                   "nonbinding_acknowledgements":stats.get("nonbinding_intents_accepted"),
                   "chain_settlements_verified":e.get("settlements_verified"),
                   "new_buyer_requests_since_restart":e.get("requests_published")}
+              result["production_business_funnel"]=stats.get("business_funnel_events",{"note":"Not available until new release is actually deployed"})
           else:
               result["production_market"]={"error":error}
           metadata,error=fetch(base+"/.well-known/mcp.json")
