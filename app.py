@@ -874,7 +874,7 @@ ul{padding-left:19px}li{margin:12px 0}
 <label>Price per service (in selected cryptocurrency)<input id="price" type="number" min="0.00000001" step="any" max="100000" value="0.01" required></label>
 <label>Quote currency<select id="currency"><option>ETH</option><option>SOL</option><option>BTC</option><option>TRX</option></select></label>
 <label>Optional HTTPS seller contact URL<input id="contact" type="url" maxlength="240" placeholder="Leave blank for free public proposal inbox"></label>
-<button id="publish" type="submit">Sign identity and list — free</button>
+<label class="fine"><input type="checkbox" id="remember" style="display:inline;width:auto;margin-right:8px" />Remember only my public listing fields on this device for manual renewal</label>\n<button id="publish" type="submit">Sign identity and list — free</button>
 <p class="fine">Connect an EVM-compatible browser wallet to prove identity only; it needs no cryptocurrency balance. You can quote BTC, SOL or TRX using that same identity signer. You must actually be able to deliver your advertised service.</p>
 <div id="status" role="status" aria-live="polite"></div>
 <div id="result" hidden><strong>Published identity-signed offer</strong><p id="detail"></p>
