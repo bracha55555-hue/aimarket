@@ -46,6 +46,7 @@ signed_offers: Dict[str, dict] = {}
 used_offer_proofs: Dict[str, int] = {}
 OFFER_CHALLENGE_SECRET = secrets.token_bytes(32)
 OFFER_TTL_SECONDS = 43200
+MAX_OFFERS_PER_AGENT = 8
 OFFER_CHALLENGE_SECONDS = 300
 MAX_PUBLIC_NEEDS = 100
 NEED_TTL_SECONDS = 3600
@@ -74,6 +75,9 @@ def usage_event(kind):
 _n4_path=os.getenv("AIMARKET_N4_PATH")
 n4_store=N4Store(_n4_path) if _n4_path else None
 
+def signed_offer_key(data):
+    return f"{data['agent_id'].lower()}:{data['capability'].strip().casefold()}:{data['currency']}"
+
 def restore_n4_records():
     if n4_store is None: return
     n4_store.purge()
@@ -84,7 +88,12 @@ def restore_n4_records():
             need["created_monotonic"]=time.monotonic()-(NEED_TTL_SECONDS-remaining)
             open_needs[nid]=need
     for ident,offer in n4_store.scan("offer",now=now).items():
-        signed_offers[ident]=offer
+        key=signed_offer_key(offer)
+        offer["offer_id"]=key
+        signed_offers[key]=offer
+        if ident!=key:
+            n4_store.put("offer",key,offer,offer["capability"],offer["currency"],offer["expires_at_unix"])
+            n4_store.delete("offer",ident)
 
 state_lock = asyncio.Lock()
 
@@ -872,24 +881,22 @@ async def handle_offer_tool(name, args):
             expire_stale_trades()
             if proof in used_offer_proofs: raise ValueError("replayed signature")
             if len(used_offer_proofs)>=1000: raise ValueError("offer proof capacity reached; retry later")
-            if data["agent_id"] not in signed_offers and len(signed_offers)>=MAX_AGENTS:
+            key=signed_offer_key(data)
+            if key not in signed_offers and len(signed_offers)>=MAX_AGENTS:
                 raise ValueError("listing capacity reached")
-            used_offer_proofs[proof]=payload["challenge_expires_at"]
-            signed_offers[data["agent_id"]]={**data,"expires_at_unix":int(time.time())+OFFER_TTL_SECONDS}
+            own=sum(o["agent_id"]==data["agent_id"] for o in signed_offers.values())
+            if key not in signed_offers and own>=MAX_OFFERS_PER_AGENT:
+                raise ValueError("maximum signed offers per identity reached")
+            record={**data,"offer_id":key,"expires_at_unix":int(time.time())+OFFER_TTL_SECONDS}
             if n4_store is not None:
-                record=signed_offers[data["agent_id"]]
-                try:
-                    n4_store.put("offer",data["agent_id"],record,
-                                 record["capability"],record["currency"],record["expires_at_unix"])
-                except Exception:
-                    signed_offers.pop(data["agent_id"],None)
-                    used_offer_proofs.pop(proof,None)
-                    raise
-            row=dict(signed_offers[data["agent_id"]])
+                n4_store.put("offer",key,record,record["capability"],record["currency"],record["expires_at_unix"])
+            signed_offers[key]=record
+            used_offer_proofs[proof]=payload["challenge_expires_at"]
+            row=dict(record)
         usage_event("signed_offers_published")
         return {"published":True,"listing":row,"expires_in_seconds":OFFER_TTL_SECONDS,
                 "online":False,"can_accept_marketplace_orders":False,"contact_url_verified":False,
-                "identity_verified":True,"funded":False,"persistence":"Process-local only; redeploy clears the listing",
+                "identity_verified":True,"funded":False,"persistence":("Optional local N4 storage; host replacement may lose it" if n4_store else "Process-local; restart clears listing"),
                 "note":"This listing verifies control of an identity key, not capability, URL ownership or service delivery. Buyers must independently validate."}
     if name=="browse_signed_offers":
         if set(args)-{"capability"}: raise ValueError("invalid filters")
@@ -901,7 +908,7 @@ async def handle_offer_tool(name, args):
             rows=[dict(o) for o in signed_offers.values() if not cap or cap.casefold() in o["capability"]]
         return {"signed_offline_offers":rows[:MAX_AGENTS],"count":len(rows),
                 "available_now":False,"identity_only":True,"contact_urls_unverified":True,
-                "persistence":"Process-local; expires after 12h or deploy",
+                "persistence":("Optional local N4 storage; not durable across Render host replacement" if n4_store else "Process-local; expires after 12h or restart"),
                 "notice":"Not online providers; browse/consult seller contact directly, do not send payment based on this directory."}
     raise ValueError("unsupported offer tool")
 
