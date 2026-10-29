@@ -64,6 +64,8 @@ jobs:
         run: |
           node --check client/seller-inbox.js
           python -m unittest -v test_seller_browser_ack.py
+      - name: Verify zero-browser, opt-in, private-identity signed offline provider client against server
+        run: python -m unittest -v test_headless_provider_client.py
       - name: Verify signed MCP seller offer without WebSocket or server-side keys
         run: |
           python - <<'PY'
