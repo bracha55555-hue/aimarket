@@ -41,6 +41,11 @@ jobs:
         run: |
           node --check client/seller-inbox.js
           python -m unittest -v test_seller_browser_ack.py
+      - name: Verify 24h signed buyer needs, 72h honest supplier offers and 12h nonbinding intentions
+        run: |
+          node --check client/provider-studio.js
+          node --check client/buyer-studio.js
+          python -m unittest -v test_market_windows.py
       - name: Verify browser seller reviews and separately signs genuine buyer proposals, no payment
         run: |
           node --check client/seller-inbox.js
