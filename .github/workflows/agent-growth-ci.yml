@@ -17,6 +17,14 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt httpx
       - run: python -m py_compile app.py
+      - name: Verify Glama official GitHub publisher identity metadata
+        run: |
+          python - <<'PY'
+          import json
+          with open("glama.json",encoding="utf-8") as f: data=json.load(f)
+          assert data=={"$schema":"https://glama.ai/mcp/schemas/server.json","maintainers":["bracha55555-hue"]}
+          print("PASS: Glama schema and real repository maintainer; listing/claim not asserted")
+          PY
       - name: Verify business homepage shows real market state and safely escapes untrusted offers
         run: python -m unittest -v test_market_homepage.py
       - name: Verify N4 database save, reload and corruption detection
