@@ -56,7 +56,7 @@ class N4Store:
         self.db.commit()
 
     def put(self,kind,id,record,dimension_a='',dimension_b='',expires_at=0):
-        if kind not in ('need','offer') or not isinstance(id,str) or not id or len(id)>128:
+        if kind not in ('need','offer','intent') or not isinstance(id,str) or not id or len(id)>128:
             raise ValueError("Invalid record identity")
         if any(not isinstance(x,str) or len(x)>128 for x in (dimension_a,dimension_b)):
             raise ValueError("Invalid dimensions")
