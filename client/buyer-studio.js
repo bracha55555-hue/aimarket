@@ -15,9 +15,11 @@
     if (last && last.id) {
       $("last").textContent = "Your last request ID: " + last.id + ". Requests expire after one hour.";
       cancel.hidden = false;
+      $("buyer-matches").hidden = false;
     } else {
       $("last").textContent = "Requests expire after one hour. No funds are reserved.";
       cancel.hidden = true;
+      $("buyer-matches").hidden = true;
     }
   }
   function done() { busy = false; post.disabled = false; cancel.disabled = false; }
@@ -85,6 +87,7 @@
             notify("Published! Your identity-signed request is visible for one hour. No funds are reserved. Check offers carefully.", "success");
             closeSocket(); done();
             $("refresh").click();
+            refreshMatchedOffers();
           } else if (msg.event === "request_cancelled") {
             if (msg.removed) {
               try { localStorage.removeItem(storeKey); } catch (_) {}
@@ -135,6 +138,106 @@
       }
     } catch (error) { notify("Could not load demand: " + error.message,"error"); }
   });
+
+  async function postJSON(path,payload) {
+    const response = await fetch(path,{
+      method:"POST",credentials:"omit",cache:"no-store",
+      headers:{"Content-Type":"application/json","Accept":"application/json"},
+      body:JSON.stringify(payload)
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "HTTP " + response.status);
+    return result;
+  }
+  async function refreshMatchedOffers() {
+    const ul = $("matching-offers");
+    ul.replaceChildren();
+    if (!last || !/^[a-f0-9]{32}$/.test(last.id || "")) {
+      $("buyer-matches").hidden = true;
+      return;
+    }
+    $("buyer-matches").hidden = false;
+    const info = document.createElement("li");
+    info.textContent = "Checking actual signed offline provider listings...";
+    ul.appendChild(info);
+    try {
+      const response = await fetch("/api/matches?request_id="+encodeURIComponent(last.id),{cache:"no-store"});
+      if (!response.ok) throw new Error("HTTP "+response.status);
+      const market = await response.json();
+      ul.replaceChildren();
+      for (const offer of (market.matches || []).slice(0,25)) {
+        if (offer.request_id !== last.id || typeof offer.offer_id !== "string") continue;
+        const li = document.createElement("li");
+        const summary = document.createElement("span");
+        summary.textContent = String(offer.capability || "Service") + ": " +
+          String(offer.seller_price) + " " + String(offer.currency) +
+          " · identity-signed seller, offline/availability not verified. ";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "secondary";
+        button.textContent = "Sign nonbinding purchase proposal";
+        button.addEventListener("click", () => proposePurchase(offer.offer_id));
+        li.appendChild(summary);
+        li.appendChild(button);
+        ul.appendChild(li);
+      }
+      if (!ul.children.length) {
+        const li = document.createElement("li");
+        li.textContent = "No matching signed provider offers yet. No order has been created. You can refresh before your request expires.";
+        ul.appendChild(li);
+      }
+    } catch (error) {
+      ul.replaceChildren();
+      const li=document.createElement("li");
+      li.textContent = "Matching offers could not be loaded: " + error.message;
+      ul.appendChild(li);
+    }
+  }
+  async function proposePurchase(offerId) {
+    if (busy || !last || !/^[a-f0-9]{32}$/.test(last.id || "")) return;
+    if (!window.ethereum || typeof window.ethereum.request !== "function") {
+      notify("An identity-signing EVM wallet is required to propose a purchase. No funds are sent.", "error");
+      return;
+    }
+    busy=true; post.disabled=true; cancel.disabled=true;
+    notify("Reviewing real matching terms. No order or payment is being initiated.");
+    try {
+      const accounts=await window.ethereum.request({method:"eth_requestAccounts"});
+      const who=accounts && accounts[0];
+      if (!/^0x[0-9a-fA-F]{40}$/.test(who || "") ||
+          !last.buyer || who.toLowerCase()!==last.buyer.toLowerCase())
+        throw new Error("Reconnect the same wallet identity that posted this buyer request");
+      const challenge=await postJSON("/api/purchase-intents/prepare",{
+        request_id:last.id,offer_id:offerId
+      });
+      if (typeof challenge.sign_this_message_exactly !== "string" ||
+          typeof challenge.challenge_proof !== "string")
+        throw new Error("Invalid signed buyer proposal challenge");
+      const message=challenge.sign_this_message_exactly;
+      notify("Review and sign the exact buyer terms. This is identity-only; no cryptocurrency will move.");
+      const bytes=new TextEncoder().encode(message);
+      const hex="0x"+Array.from(bytes,(n)=>n.toString(16).padStart(2,"0")).join("");
+      const signature=await window.ethereum.request({
+        method:"personal_sign",params:[hex,who]
+      });
+      if (typeof signature!=="string" || !/^(0x)?[a-fA-F0-9]{130}$/.test(signature))
+        throw new Error("Invalid wallet message signature");
+      const result=await postJSON("/api/purchase-intents/publish",{
+        message,challenge_proof:challenge.challenge_proof,signature
+      });
+      if (!result.published || result.order_created!==false ||
+          result.payment_verified!==false || result.funds_reserved!==false)
+        throw new Error("The server did not confirm a safe nonfunded proposal");
+      notify("Your genuine buyer identity signed a nonbinding proposal for the seller. No money, purchase order, escrow or delivery was created. Ask the seller to check their public inbox.", "success");
+      refreshMatchedOffers();
+    } catch (error) {
+      notify("Proposal not published: " + (error.message || String(error)), "error");
+    } finally {
+      busy=false;post.disabled=false;cancel.disabled=false;
+    }
+  }
+  $("refresh-matches").addEventListener("click", refreshMatchedOffers);
   refreshLast();
   $("refresh").click();
+  refreshMatchedOffers();
 })();
