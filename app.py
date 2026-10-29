@@ -1108,6 +1108,11 @@ async def purchase_intents_api(seller: Optional[str]=None,offer_id: Optional[str
     except ValueError as exc: return JSONResponse({"error":str(exc)},status_code=422)
 
 MCP_TOOL_DEFINITIONS = [
+    {"name":"prepare_purchase_intent","title":"Prepare buyer-signed purchase intent","description":"Create a buyer EIP-191 challenge anchored to a real matching request and signed provider offer. Never moves funds.","inputSchema":{"type":"object","properties":{"request_id":{"type":"string"},"offer_id":{"type":"string"}},"required":["request_id","offer_id"],"additionalProperties":False}},
+    {"name":"publish_purchase_intent","title":"Publish nonbinding buyer proposal","description":"Verify buyer signature for an authentic match and publish a nonfunded, nonbinding proposal.","inputSchema":{"type":"object","properties":{"message":{"type":"string"},"challenge_proof":{"type":"string"},"signature":{"type":"string"}},"required":["message","challenge_proof","signature"],"additionalProperties":False}},
+    {"name":"browse_purchase_intents","title":"Browse real buyer proposals","description":"Read signed nonbinding proposals, optionally filtered by seller or offer ID. No payment claims.","inputSchema":{"type":"object","properties":{"seller":{"type":"string"},"offer_id":{"type":"string"}},"additionalProperties":False}},
+    {"name":"prepare_accept_intent","title":"Prepare seller-signed acknowledgement","description":"Generate a seller EIP-191 challenge for an unchanged, buyer-signed proposal.","inputSchema":{"type":"object","properties":{"intent_id":{"type":"string"}},"required":["intent_id"],"additionalProperties":False}},
+    {"name":"accept_purchase_intent","title":"Sign seller acknowledgement","description":"Verify seller identity and exact buyer terms. Records a mutual nonbinding intent only; no order or settled transfer.","inputSchema":{"type":"object","properties":{"message":{"type":"string"},"challenge_proof":{"type":"string"},"signature":{"type":"string"}},"required":["message","challenge_proof","signature"],"additionalProperties":False}},
     {"name":"prepare_signed_offer","title":"Prepare a no-install service listing","description":"Generate a domain-bound time-limited EIP-191 message for a self-declared service offering; identity key stays local. No funds moved.","inputSchema":{"type":"object","properties":{"agent_id":{"type":"string"},"capability":{"type":"string"},"currency":{"type":"string","enum":["BTC","ETH","SOL","TRX"]},"price":{"type":"number","exclusiveMinimum":0},"contact_url":{"type":"string","description":"HTTPS URL of seller-managed intake (not verified by AI Market)"}},"required":["agent_id","capability","currency","price","contact_url"],"additionalProperties":False}},
     {"name":"publish_signed_offer","title":"Publish signed service listing (changes market)","description":"Publish a time-limited offline self-declared offer using proof, exact signed message and EIP-191 signature. Consent required; no payment. NOT an online live provider.","inputSchema":{"type":"object","properties":{"message":{"type":"string"},"challenge_proof":{"type":"string"},"signature":{"type":"string"}},"required":["message","challenge_proof","signature"],"additionalProperties":False}},
     {"name":"browse_signed_offers","title":"Browse signed offline service offers","description":"Discover signed but offline/availability-unverified seller listings; no funds or trust guaranteed.","inputSchema":{"type":"object","properties":{"capability":{"type":"string"}},"additionalProperties":False}},
@@ -1170,6 +1175,9 @@ async def legacy_mcp_request(request, msg):
         try: data=await handle_offer_tool(name,arguments)
         except ValueError as exc:
             return mcp_jsonrpc_error(request_id,-32602,str(exc))
+    elif name in ("prepare_purchase_intent","publish_purchase_intent","browse_purchase_intents","prepare_accept_intent","accept_purchase_intent"):
+        try: data=await handle_purchase_intent(name,arguments)
+        except ValueError as exc: return mcp_jsonrpc_error(request_id,-32602,str(exc))
     elif name == "match_real_services":
         if set(arguments)-{"capability","currency","request_id"}:
             return mcp_jsonrpc_error(request_id,-32602,"Invalid match filters")
@@ -1317,6 +1325,9 @@ async def mcp_endpoint(request: Request):
             try: data=await handle_offer_tool(name,arguments)
             except ValueError as exc:
                 return JSONResponse({"jsonrpc":"2.0","id":request_id,"error":{"code":-32602,"message":str(exc)}},status_code=400)
+        elif name in ("prepare_purchase_intent","publish_purchase_intent","browse_purchase_intents","prepare_accept_intent","accept_purchase_intent"):
+            try: data=await handle_purchase_intent(name,arguments)
+            except ValueError as exc: return mcp_jsonrpc_error(request_id,-32602,str(exc))
         elif name == "match_real_services":
             if set(arguments)-{"capability","currency","request_id"}:
                 return mcp_jsonrpc_error(request_id,-32602,"Invalid match filters")
