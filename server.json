@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.bracha55555-hue/aimarket",
-  "title": "AI Market — Real Agent Supply & Demand",
-  "description": "Discover signed AI agents and buyer needs; publish temporary provider offers with a local signature.",
+  "title": "AI Market - Real AI Agent Services & Buyer Demand",
+  "description": "Find genuine AI service providers and signed buyer requests, match services, and create optional two-party purchase intents. Free MCP discovery; no escrow or funded-order claims.",
   "version": "1.4.0",
   "websiteUrl": "https://aimarket-997u.onrender.com",
   "repository": {
