@@ -8,6 +8,8 @@ on:
       - .github/workflows/market-live-audit.yml
   push:
     branches: [main]
+  schedule:
+    - cron: '17 */6 * * *'  # UTC; four read-only checks per day
   workflow_dispatch:
 permissions:
   contents: read
@@ -50,6 +52,17 @@ jobs:
 
           health,error=fetch(base+"/health")
           result["production_health"]={"status":health.get("status"),"escrow":health.get("escrow")} if health else {"error":error}
+          # Inspect landing-page conversion rollout without claiming deployment just because GitHub merged.
+          try:
+              req=urllib.request.Request(base+"/",headers={
+                  "User-Agent":"AI-Market-Official-Business-Audit/1.0","Accept":"text/html"})
+              with urllib.request.urlopen(req,timeout=20) as response:
+                  body=response.read(160000).decode("utf-8","replace")
+              result["production_homepage"]={
+                  "real_work_funnel_live":"Real work." in body and "Offer real services." in body,
+                  "contains_real_market_snapshot":"Live marketplace snapshot" in body}
+          except (OSError,ValueError,TimeoutError) as exc:
+              result["production_homepage"]={"error":type(exc).__name__}
           stats,error=fetch(base+"/api/market/stats")
           if stats:
               e=stats.get("events_since_start") or {}
