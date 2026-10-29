@@ -44,6 +44,10 @@ active_trades: Dict[str, dict] = {}
 open_needs: Dict[str, dict] = {}
 signed_offers: Dict[str, dict] = {}
 used_offer_proofs: Dict[str, int] = {}
+purchase_intents: Dict[str, dict] = {}
+used_intent_proofs: Dict[str, int] = {}
+INTENT_TTL_SECONDS = 1800
+MAX_INTENTS = 100
 OFFER_CHALLENGE_SECRET = secrets.token_bytes(32)
 OFFER_TTL_SECONDS = 43200
 MAX_OFFERS_PER_AGENT = 8
@@ -94,6 +98,8 @@ def restore_n4_records():
         if ident!=key:
             n4_store.put("offer",key,offer,offer["capability"],offer["currency"],offer["expires_at_unix"])
             n4_store.delete("offer",ident)
+    for ident,intent in n4_store.scan("intent",now=now).items():
+        purchase_intents[ident]=intent
 
 state_lock = asyncio.Lock()
 
@@ -123,8 +129,14 @@ def expire_stale_trades(now=None):
         if time.time() >= offer["expires_at_unix"]:
             signed_offers.pop(ident,None)
             if n4_store is not None: n4_store.delete("offer",ident)
+    for ident,intent in list(purchase_intents.items()):
+        if time.time()>=intent["expires_at_unix"]:
+            purchase_intents.pop(ident,None)
+            if n4_store is not None: n4_store.delete("intent",ident)
     for proof, expires in list(used_offer_proofs.items()):
         if time.time() >= expires: used_offer_proofs.pop(proof,None)
+    for proof, expires in list(used_intent_proofs.items()):
+        if time.time() >= expires: used_intent_proofs.pop(proof,None)
     return len(expired)
 
 async def stale_order_reaper():
@@ -946,7 +958,161 @@ async def handle_offer_tool(name, args):
                 "notice":"Not online providers; browse/consult seller contact directly, do not send payment based on this directory."}
     raise ValueError("unsupported offer tool")
 
+
+INTENT_PREFIX={"buyer":"AI Market buyer intent v1\n","seller":"AI Market seller acceptance v1\n"}
+
+def intent_digest(record,keys):
+    return hashlib.sha256(json.dumps({k:record[k] for k in keys},sort_keys=True,separators=(",",":"),ensure_ascii=True).encode()).hexdigest()
+
+def current_intent_terms(request_id,offer_id):
+    need,offer=open_needs.get(request_id),signed_offers.get(offer_id)
+    if (not need or not offer or need["buyer"].lower()==offer["agent_id"].lower()
+        or need["capability"].strip().casefold()!=offer["capability"]
+        or need["currency"]!=offer["currency"]
+        or Decimal(str(offer["price"]))>Decimal(str(need["max_budget"]))
+        or time.time()>=min(datetime.fromisoformat(need["expires_at"]).timestamp(),offer["expires_at_unix"])):
+        raise ValueError("no current qualified buyer request and seller offer")
+    return {"origin":PUBLIC_SERVER_URL.rstrip("/"),"request_id":request_id,"offer_id":offer_id,
+            "buyer":need["buyer"].lower(),"seller":offer["agent_id"].lower(),
+            "currency":offer["currency"],"capability":offer["capability"],
+            "price":str(Decimal(str(offer["price"]))),
+            "buyer_terms_hash":intent_digest(need,("id","buyer","capability","currency","max_budget","details","created_at","expires_at")),
+            "seller_terms_hash":intent_digest(offer,("agent_id","capability","currency","price","contact_url","expires_at_unix"))}
+
+def intent_signing_text(role,fields):
+    return INTENT_PREFIX[role]+json.dumps(fields,sort_keys=True,separators=(",",":"),ensure_ascii=True)
+
+def validate_intent_signature(role,args):
+    if set(args)!={"message","challenge_proof","signature"}: raise ValueError("signed message, proof and signature required")
+    msg,proof,sig=args["message"],args["challenge_proof"],args["signature"]
+    if (not isinstance(msg,str) or len(msg)>2048 or not msg.startswith(INTENT_PREFIX[role])
+        or not isinstance(proof,str) or not re.fullmatch("[a-f0-9]{64}",proof)
+        or not isinstance(sig,str) or not re.fullmatch("(0x)?[a-fA-F0-9]{130}",sig)):
+        raise ValueError("invalid intent signature shape")
+    if not hmac.compare_digest(proof,hmac.new(OFFER_CHALLENGE_SECRET,msg.encode(),hashlib.sha256).hexdigest()):
+        raise ValueError("invalid intent challenge proof")
+    try:
+        fields=json.loads(msg[len(INTENT_PREFIX[role]):])
+        if not isinstance(fields,dict) or msg!=intent_signing_text(role,fields):
+            raise ValueError("noncanonical intent")
+        if (not isinstance(fields.get("nonce"),str) or not re.fullmatch("[a-f0-9]{32}",fields["nonce"])
+            or type(fields.get("challenge_expires_at")) is not int
+            or not 0<=fields["challenge_expires_at"]-int(time.time())<=OFFER_CHALLENGE_SECONDS):
+            raise ValueError("expired challenge")
+        signer=Account.recover_message(encode_defunct(text=msg),signature=sig).lower()
+    except Exception:
+        raise ValueError("invalid signed intent")
+    return fields,signer,proof
+
+def public_purchase_intent(item):
+    keys=("id","request_id","offer_id","buyer","seller","capability","currency","price","status","created_at_unix","expires_at_unix")
+    return {k:item[k] for k in keys}
+
+async def handle_purchase_intent(name,args):
+    if name=="prepare_purchase_intent":
+        if set(args)!={"request_id","offer_id"}: raise ValueError("request_id and offer_id required")
+        rid,oid=args["request_id"],args["offer_id"]
+        if not isinstance(rid,str) or not re.fullmatch("[a-f0-9]{32}",rid) or not isinstance(oid,str) or not 1<=len(oid)<=160:
+            raise ValueError("invalid pair ids")
+        async with state_lock:
+            expire_stale_trades()
+            terms=current_intent_terms(rid,oid)
+        fields={**terms,"nonce":secrets.token_hex(16),"challenge_expires_at":int(time.time())+OFFER_CHALLENGE_SECONDS}
+        message=intent_signing_text("buyer",fields)
+        proof=hmac.new(OFFER_CHALLENGE_SECRET,message.encode(),hashlib.sha256).hexdigest()
+        return {"sign_this_message_exactly":message,"challenge_proof":proof,"next_tool":"publish_purchase_intent",
+                "signature_scheme":"EIP-191 personal_sign","payment_verified":False,"notice":"Nonbinding identity-signed buyer proposal. No order or transfer."}
+    if name=="publish_purchase_intent":
+        fields,signer,proof=validate_intent_signature("buyer",args)
+        if not isinstance(fields.get("request_id"),str) or not isinstance(fields.get("offer_id"),str):
+            raise ValueError("invalid intent references")
+        async with state_lock:
+            expire_stale_trades()
+            terms=current_intent_terms(fields["request_id"],fields["offer_id"])
+            if set(fields)!=set(terms)|{"nonce","challenge_expires_at"} or any(fields[k]!=v for k,v in terms.items()):
+                raise ValueError("stale or altered buyer proposal")
+            if signer!=terms["buyer"]: raise ValueError("buyer signature mismatch")
+            if proof in used_intent_proofs: raise ValueError("replayed buyer proposal")
+            ident=hashlib.sha256((terms["request_id"]+"|"+terms["offer_id"]).encode()).hexdigest()
+            if ident in purchase_intents: raise ValueError("purchase intent already exists")
+            if len(purchase_intents)>=MAX_INTENTS or sum(p["buyer"]==signer for p in purchase_intents.values())>=3:
+                raise ValueError("purchase intent limit")
+            need,offer=open_needs[terms["request_id"]],signed_offers[terms["offer_id"]]
+            expiry=min(int(time.time())+INTENT_TTL_SECONDS,
+                       int(datetime.fromisoformat(need["expires_at"]).timestamp()),int(offer["expires_at_unix"]))
+            if expiry<=int(time.time()): raise ValueError("match expiring")
+            record={**terms,"id":ident,"status":"proposed","created_at_unix":int(time.time()),
+                    "expires_at_unix":expiry,"buyer_message":args["message"],"buyer_signature":args["signature"]}
+            if n4_store is not None: n4_store.put("intent",ident,record,terms["seller"],terms["currency"],expiry)
+            purchase_intents[ident]=record
+            used_intent_proofs[proof]=fields["challenge_expires_at"]
+            return {"published":True,"intent":public_purchase_intent(record),"seller_accepted":False,
+                    "payment_verified":False,"funds_reserved":False,"order_created":False}
+    if name=="browse_purchase_intents":
+        if set(args)-{"seller","offer_id"}: raise ValueError("invalid intent filters")
+        seller,oid=args.get("seller"),args.get("offer_id")
+        if seller is not None and (not isinstance(seller,str) or not Web3.is_address(seller)): raise ValueError("invalid seller")
+        if oid is not None and (not isinstance(oid,str) or not 1<=len(oid)<=160): raise ValueError("invalid offer_id")
+        async with state_lock:
+            expire_stale_trades()
+            rows=[public_purchase_intent(x) for x in purchase_intents.values()
+                  if (seller is None or x["seller"]==seller.lower()) and (oid is None or x["offer_id"]==oid)]
+        return {"intents":rows[:100],"count":len(rows),"nonbinding":True,"payment_verified":False,"escrow":False}
+    if name=="prepare_accept_intent":
+        if set(args)!={"intent_id"} or not isinstance(args["intent_id"],str) or not re.fullmatch("[a-f0-9]{64}",args["intent_id"]):
+            raise ValueError("valid intent_id required")
+        async with state_lock:
+            expire_stale_trades()
+            item=purchase_intents.get(args["intent_id"])
+            if not item or item["status"]!="proposed": raise ValueError("intent unavailable")
+            terms=current_intent_terms(item["request_id"],item["offer_id"])
+            if any(item[k]!=v for k,v in terms.items()): raise ValueError("terms changed")
+            fields={"origin":PUBLIC_SERVER_URL.rstrip("/"),"intent_id":item["id"],
+                    "buyer":item["buyer"],"seller":item["seller"],
+                    "buyer_message_hash":hashlib.sha256(item["buyer_message"].encode()).hexdigest(),
+                    "nonce":secrets.token_hex(16),"challenge_expires_at":int(time.time())+OFFER_CHALLENGE_SECONDS}
+        message=intent_signing_text("seller",fields)
+        proof=hmac.new(OFFER_CHALLENGE_SECRET,message.encode(),hashlib.sha256).hexdigest()
+        return {"sign_this_message_exactly":message,"challenge_proof":proof,
+                "next_tool":"accept_purchase_intent","signature_scheme":"EIP-191 personal_sign",
+                "notice":"Acknowledge exact buyer terms only; no payment or confirmed fulfillment."}
+    if name=="accept_purchase_intent":
+        fields,signer,proof=validate_intent_signature("seller",args)
+        if set(fields)!={"origin","intent_id","buyer","seller","buyer_message_hash","nonce","challenge_expires_at"}:
+            raise ValueError("invalid acceptance fields")
+        async with state_lock:
+            expire_stale_trades()
+            item=purchase_intents.get(fields["intent_id"])
+            if not item or item["status"]!="proposed": raise ValueError("intent unavailable or already accepted")
+            terms=current_intent_terms(item["request_id"],item["offer_id"])
+            if any(item[k]!=v for k,v in terms.items()): raise ValueError("underlying terms changed")
+            if (fields["origin"]!=PUBLIC_SERVER_URL.rstrip("/") or signer!=item["seller"]
+                or fields["buyer"]!=item["buyer"] or fields["seller"]!=item["seller"]
+                or fields["buyer_message_hash"]!=hashlib.sha256(item["buyer_message"].encode()).hexdigest()):
+                raise ValueError("seller identity or signed terms mismatch")
+            if proof in used_intent_proofs: raise ValueError("replayed acceptance")
+            record={**item,"status":"accepted","seller_message":args["message"],"seller_signature":args["signature"]}
+            if n4_store is not None: n4_store.put("intent",item["id"],record,item["seller"],item["currency"],record["expires_at_unix"])
+            purchase_intents[item["id"]]=record
+            used_intent_proofs[proof]=fields["challenge_expires_at"]
+            return {"accepted":True,"intent":public_purchase_intent(record),"two_identities_signed":True,
+                    "binding_order":False,"payment_verified":False,"funds_reserved":False,"escrow":False,
+                    "next_step":"Agree on delivery and independently verify the chain-specific payment proof."}
+    raise ValueError("unsupported intent tool")
+
+@app.get("/api/purchase-intents")
+async def purchase_intents_api(seller: Optional[str]=None,offer_id: Optional[str]=None):
+    try: return await handle_purchase_intent("browse_purchase_intents",{
+        **({"seller":seller} if seller is not None else {}),
+        **({"offer_id":offer_id} if offer_id is not None else {})})
+    except ValueError as exc: return JSONResponse({"error":str(exc)},status_code=422)
+
 MCP_TOOL_DEFINITIONS = [
+    {"name":"prepare_purchase_intent","title":"Prepare buyer-signed purchase intent","description":"Create a buyer EIP-191 challenge anchored to a real matching request and signed provider offer. Never moves funds.","inputSchema":{"type":"object","properties":{"request_id":{"type":"string"},"offer_id":{"type":"string"}},"required":["request_id","offer_id"],"additionalProperties":False}},
+    {"name":"publish_purchase_intent","title":"Publish nonbinding buyer proposal","description":"Verify buyer signature for an authentic match and publish a nonfunded, nonbinding proposal.","inputSchema":{"type":"object","properties":{"message":{"type":"string"},"challenge_proof":{"type":"string"},"signature":{"type":"string"}},"required":["message","challenge_proof","signature"],"additionalProperties":False}},
+    {"name":"browse_purchase_intents","title":"Browse real buyer proposals","description":"Read signed nonbinding proposals, optionally filtered by seller or offer ID. No payment claims.","inputSchema":{"type":"object","properties":{"seller":{"type":"string"},"offer_id":{"type":"string"}},"additionalProperties":False}},
+    {"name":"prepare_accept_intent","title":"Prepare seller-signed acknowledgement","description":"Generate a seller EIP-191 challenge for an unchanged, buyer-signed proposal.","inputSchema":{"type":"object","properties":{"intent_id":{"type":"string"}},"required":["intent_id"],"additionalProperties":False}},
+    {"name":"accept_purchase_intent","title":"Sign seller acknowledgement","description":"Verify seller identity and exact buyer terms. Records a mutual nonbinding intent only; no order or settled transfer.","inputSchema":{"type":"object","properties":{"message":{"type":"string"},"challenge_proof":{"type":"string"},"signature":{"type":"string"}},"required":["message","challenge_proof","signature"],"additionalProperties":False}},
     {"name":"prepare_signed_offer","title":"Prepare a no-install service listing","description":"Generate a domain-bound time-limited EIP-191 message for a self-declared service offering; identity key stays local. No funds moved.","inputSchema":{"type":"object","properties":{"agent_id":{"type":"string"},"capability":{"type":"string"},"currency":{"type":"string","enum":["BTC","ETH","SOL","TRX"]},"price":{"type":"number","exclusiveMinimum":0},"contact_url":{"type":"string","description":"HTTPS URL of seller-managed intake (not verified by AI Market)"}},"required":["agent_id","capability","currency","price","contact_url"],"additionalProperties":False}},
     {"name":"publish_signed_offer","title":"Publish signed service listing (changes market)","description":"Publish a time-limited offline self-declared offer using proof, exact signed message and EIP-191 signature. Consent required; no payment. NOT an online live provider.","inputSchema":{"type":"object","properties":{"message":{"type":"string"},"challenge_proof":{"type":"string"},"signature":{"type":"string"}},"required":["message","challenge_proof","signature"],"additionalProperties":False}},
     {"name":"browse_signed_offers","title":"Browse signed offline service offers","description":"Discover signed but offline/availability-unverified seller listings; no funds or trust guaranteed.","inputSchema":{"type":"object","properties":{"capability":{"type":"string"}},"additionalProperties":False}},
@@ -1009,6 +1175,9 @@ async def legacy_mcp_request(request, msg):
         try: data=await handle_offer_tool(name,arguments)
         except ValueError as exc:
             return mcp_jsonrpc_error(request_id,-32602,str(exc))
+    elif name in ("prepare_purchase_intent","publish_purchase_intent","browse_purchase_intents","prepare_accept_intent","accept_purchase_intent"):
+        try: data=await handle_purchase_intent(name,arguments)
+        except ValueError as exc: return mcp_jsonrpc_error(request_id,-32602,str(exc))
     elif name == "match_real_services":
         if set(arguments)-{"capability","currency","request_id"}:
             return mcp_jsonrpc_error(request_id,-32602,"Invalid match filters")
@@ -1156,6 +1325,9 @@ async def mcp_endpoint(request: Request):
             try: data=await handle_offer_tool(name,arguments)
             except ValueError as exc:
                 return JSONResponse({"jsonrpc":"2.0","id":request_id,"error":{"code":-32602,"message":str(exc)}},status_code=400)
+        elif name in ("prepare_purchase_intent","publish_purchase_intent","browse_purchase_intents","prepare_accept_intent","accept_purchase_intent"):
+            try: data=await handle_purchase_intent(name,arguments)
+            except ValueError as exc: return mcp_jsonrpc_error(request_id,-32602,str(exc))
         elif name == "match_real_services":
             if set(arguments)-{"capability","currency","request_id"}:
                 return mcp_jsonrpc_error(request_id,-32602,"Invalid match filters")
