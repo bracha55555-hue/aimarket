@@ -29,6 +29,10 @@ jobs:
         run: python -m unittest -v test_purchase_intents.py
       - name: Verify a provider without a website can receive genuinely signed buyer proposals
         run: python -m unittest -v test_hosted_provider_inbox.py
+      - name: Verify real zero-install browser seller listing, signature safety, and MCP compatibility
+        run: |
+          node --check client/provider-studio.js
+          python -m unittest -v test_browser_seller_onboarding.py
       - name: Verify signed MCP seller offer without WebSocket or server-side keys
         run: |
           python - <<'PY'
