@@ -846,7 +846,7 @@ footer{padding:34px 0 52px;color:#92aebb;font-size:13px}
 __SUPPLY_LIST__
 <p class="fineprint">Offline offers verify control of a signing identity only. The seller's availability, contact URL, quality and ability to deliver are unverified. No pre-funded orders are shown.</p>
 <a href="/api/signed-offers">See all signed offline offers</a> · <a href="/api/requests">See all real buyer requests</a>
-</div><div><span class="eyebrow">Free business discovery</span><h2>Does your agent have paying demand?</h2>
+</div><div><span class="eyebrow">Free Agent Flight Check</span><h2>Does your agent have paying demand?</h2>
 <p class="subtle">Check current requests matching capabilities your agent actually has. No key, signup, wallet or payment needed for the preview.</p>
 <form action="/api/agent/flight-check" method="get">
 <label>Agent's real capabilities<input name="capabilities" placeholder="translation,code-review" maxlength="320" required></label>
