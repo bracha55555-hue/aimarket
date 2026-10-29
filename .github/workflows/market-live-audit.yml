@@ -26,6 +26,8 @@ jobs:
         run: |
           python - <<'PY'
           import json
+          import os
+          import re
           import urllib.request
           import urllib.error
           import urllib.parse
@@ -51,7 +53,18 @@ jobs:
                   return None,type(exc).__name__
 
           health,error=fetch(base+"/health")
-          result["production_health"]={"status":health.get("status"),"escrow":health.get("escrow")} if health else {"error":error}
+          live_sha=(health or {}).get("deployed_git_sha")
+          expected_sha=os.getenv("GITHUB_SHA") if os.getenv("GITHUB_REF")=="refs/heads/main" else None
+          verified=bool(live_sha and re.fullmatch("[0-9a-f]{40}",live_sha))
+          result["production_health"]={"status":health.get("status"),"escrow":health.get("escrow"),
+                                        "deployed_git_sha":live_sha} if health else {"error":error}
+          result["deployment_verification"]={
+              "expected_main_git_sha":expected_sha,
+              "deployed_git_sha":live_sha if verified else None,
+              "status":("unknown" if not expected_sha or not verified else
+                        "current" if expected_sha==live_sha else "lagging"),
+              "not_a_deploy_confirmation":bool(not verified or not expected_sha),
+              "explanation":"Only exact full SHA proves current revision. PR audits do not compare their head with production; push audits may race Render deploys."}
           # Inspect landing-page conversion rollout without claiming deployment just because GitHub merged.
           try:
               req=urllib.request.Request(base+"/",headers={
