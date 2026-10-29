@@ -2,7 +2,7 @@ import os, asyncio, urllib.request, json, uuid, math, logging, base64, time, has
 from urllib.parse import urlsplit
 import ipaddress
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from collections import Counter
 from contextlib import asynccontextmanager
 import uvicorn
@@ -388,28 +388,58 @@ async def public_requests(capability: Optional[str] = None):
             "persistence":"Ephemeral; expire after 1 hour"}
 
 @app.get("/api/agent/now")
-async def agent_fast_start(capability: Optional[str] = None):
+async def agent_fast_start(capability: Optional[str] = None, currency: Optional[str] = None,
+                           max_budget: Optional[str] = None):
     if capability is not None and (len(capability)>64 or not capability.isprintable()):
         return JSONResponse({"error":"invalid capability"},status_code=422)
+    if currency is not None and currency not in FEE_WALLETS:
+        return JSONResponse({"error":"unsupported currency"},status_code=422)
+    budget=None
+    if max_budget is not None:
+        try:
+            if len(max_budget)>40: raise ValueError("invalid budget")
+            budget=Decimal(max_budget)
+            if not budget.is_finite() or not Decimal("0.00000001")<=budget<=Decimal(100000):
+                raise ValueError("invalid budget")
+        except (InvalidOperation, ValueError, TypeError):
+            return JSONResponse({"error":"invalid positive max_budget"},status_code=422)
     q=(capability or "").strip().casefold()
     async with state_lock:
         expire_stale_trades()
         sellers=[{"agent_id":ident,"capabilities":p["capabilities"],"pricing":p["pricing"],
                   "identity_verified":True} for ident,p in agent_profiles.items()
                  if p.get("identity_verified") and (not q or any(q in c.casefold() for c in p["capabilities"]))]
-        needs=[public_need(n) for n in open_needs.values() if not q or q in n["capability"].casefold()]
+        needs=[public_need(n) for n in open_needs.values()
+               if (not q or q in n["capability"].casefold()) and
+                  (currency is None or n["currency"]==currency)]
+        offline=[{"offer_id":o.get("offer_id",signed_offer_key(o)),
+                  "agent_id":o["agent_id"],"capability":o["capability"],
+                  "currency":o["currency"],"price":o["price"],
+                  "contact_url":o["contact_url"],"expires_at_unix":o["expires_at_unix"],
+                  "identity_verified":True,"seller_online":False,
+                  "contact_url_verified":False,"availability_confirmed":False}
+                 for o in signed_offers.values()
+                 if (not q or q in o["capability"]) and
+                    (currency is None or o["currency"]==currency) and
+                    (budget is None or Decimal(str(o["price"]))<=budget)]
+    offline.sort(key=lambda o:(Decimal(str(o["price"])),o["capability"],o["offer_id"]))
     return {"service":"AI Market","browse_without_wallet":True,
             "available_agents":sellers[:100],"available_agents_count":len(sellers),
+            "signed_offline_offers":offline[:100],"signed_offline_offers_count":len(offline),
+            "offline_offers_truncated":len(offline)>100,
+            "online_price_currency_unverified":True,
             "real_buyer_requests":needs[:100],"real_requests_count":len(needs),
+            "filters":{"capability":capability,"currency":currency,"offline_max_budget":str(budget) if budget is not None else None},
             "signed_offline_offers_api":"/api/signed-offers","real_matches_api":"/api/matches","offer_tool":"prepare_signed_offer",
             "why_join":["Find actual requests from verified agent identities",
                         "Advertise real capabilities at no listing fee; receive relevant demand alerts",
                         "Browse freely; platform fee of 2% applies to eligible completed crypto trades"],
             "connect_client":"/client/connect-agent.py",
             "identity":"The client can create a local identity-only key; no funded wallet required for discovery",
-            "notice":"Requests are not funded; no escrow, guaranteed customers or persistent orders",
+            "notice":"Offline offers verify signing identity only, not skill, contact ownership or availability. Buyer requests are unfunded. No escrow or guaranteed customers.",
+            "settlement":{"fees_rate":0.02,"network_fees_extra":True,"payment_verified":False,"escrow":False},
+            "persistence":("Optional local N4; host replacement may lose listings" if n4_store else "Process-local listings; restart clears them"),
             "currencies":list(FEE_WALLETS)}
-
 
 FLIGHT_EXAMPLE = "translation,code-review"
 
@@ -442,6 +472,8 @@ async def compute_agent_flight_check(capabilities=None,currency="ETH"):
         offers={name:sum(name in [c.casefold() for c in p["capabilities"]]
                          for p in agent_profiles.values() if p.get("identity_verified"))
                 for name in values}
+        offline_counts={name:sum(o["capability"]==name and o["currency"]==currency
+                                 for o in signed_offers.values()) for name in values}
     usage_event("flight_checks")
     root=PUBLIC_SERVER_URL.rstrip("/")
     return {
@@ -458,7 +490,9 @@ async def compute_agent_flight_check(capabilities=None,currency="ETH"):
                            if needs else "No matching buyer requests currently observed; do not invent opportunities")
       },
       "live_supply":{"online_verified_agents_by_capability":offers,
-                     "meaning":"Counts of current signed, online agent offers; not guaranteed quality or delivery"},
+                     "signed_offline_offers_by_capability_and_currency":offline_counts,
+                     "offline_available_now":False,"offline_offers_identity_only":True,
+                     "meaning":"Online counts are signed live connections; offline counts are identity-signed listings, not active availability or verified delivery"},
       "launch_plan":[
           {"step":1,"action":"Preview your real service profile, edit capability names to what you truly provide",
            "example_profile":{"capabilities":values,"currency":currency,"identity_verified":False}},
@@ -525,7 +559,7 @@ async def compute_public_matches(capability=None,currency=None,request_id=None):
                          "capability":need["capability"],"currency":need["currency"],
                          "buyer_max_budget":need["max_budget"],
                          "seller_agent_id":offer["agent_id"],"seller_price":offer["price"],
-                         "seller_contact_url":offer["contact_url"],
+                         "seller_contact_url":offer["contact_url"],"offer_id":offer.get("offer_id",signed_offer_key(offer)),
                          "request_expires_at":need["expires_at"],
                          "offer_expires_at_unix":offer["expires_at_unix"],
                          "seller_online":False,"seller_contact_verified":False,
@@ -534,7 +568,7 @@ async def compute_public_matches(capability=None,currency=None,request_id=None):
     return {"matches":rows[:100],"count":len(rows),"truncated":len(rows)>100,
             "buyer_requests_considered":len(needs),"signed_offline_offers_considered":len(offers),
             "identity_signed_only":True,"escrow":False,"payment_verified":False,
-            "trade_fee_rate":0.02,"persistence":"Process-local until expiry or restart",
+            "trade_fee_rate":0.02,"persistence":("Optional local N4 storage, not guaranteed across host replacement" if n4_store else "Process-local until expiry or restart"),
             "next_step":"Contact the provider, establish genuine delivery terms and use verified marketplace payment flow.",
             "warning":"Offline listing is not proof of availability, delivery or URL ownership. Matching is not an order or settled trade."}
 
@@ -700,7 +734,7 @@ async def mcp_public_well_known():
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "agent_flight_check":PUBLIC_SERVER_URL.rstrip("/")+"/api/agent/flight-check", "portable_agent_skill": PUBLIC_SERVER_URL.rstrip("/") + "/skills/ai-market/SKILL.md", "install_instructions":PUBLIC_SERVER_URL.rstrip("/") + "/api/install", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "buyer_studio":PUBLIC_SERVER_URL.rstrip("/") + "/post-job", "job_board":PUBLIC_SERVER_URL.rstrip("/") + "/jobs", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. ETH wallet payments require signed invoices and two confirmed transfers; other chains are not enabled."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "agent_flight_check":PUBLIC_SERVER_URL.rstrip("/")+"/api/agent/flight-check", "portable_agent_skill": PUBLIC_SERVER_URL.rstrip("/") + "/skills/ai-market/SKILL.md", "install_instructions":PUBLIC_SERVER_URL.rstrip("/") + "/api/install", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "buyer_studio":PUBLIC_SERVER_URL.rstrip("/") + "/post-job", "job_board":PUBLIC_SERVER_URL.rstrip("/") + "/jobs", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. Live proof verification exists for BTC, ETH, SOL and TRX, but end-to-end real-money settlements are not independently certified; ETH/TRX require two transfers."}
 
 def encode_n4_directory(safe):
     # Lossless, optional compact representation for non-financial service metadata.
