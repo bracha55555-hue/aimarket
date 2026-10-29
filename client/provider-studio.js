@@ -4,6 +4,22 @@
   const $ = (id) => document.getElementById(id);
   const button = $("publish"), status = $("status");
   let busy = false;
+  const draftKey = "ai-market:seller-draft-v1";
+  // Draft contains only self-declared public offer fields. No identity, private key, proof or signature.
+  try {
+    const draft = JSON.parse(window.localStorage.getItem(draftKey) || "null");
+    if (draft && /^[A-Za-z0-9 ._-]{1,48}$/.test(draft.capability || "") &&
+        ["BTC","ETH","SOL","TRX"].includes(draft.currency) &&
+        Number(draft.price)>0 && Number(draft.price)<=100000 &&
+        (!draft.contact || (typeof draft.contact==="string" && draft.contact.length<=240))) {
+      $("capability").value=draft.capability;
+      $("price").value=draft.price;
+      $("currency").value=draft.currency;
+      $("contact").value=draft.contact || "";
+      $("remember").checked=true;
+      status.textContent="Public listing details recovered from this browser. Re-sign manually to renew or repost. No service is currently guaranteed available.";
+    }
+  } catch (_) { /* Browser may block localStorage. Publishing still works. */ }
   const notify = (message, kind = "info") => {
     status.textContent = message;
     status.dataset.kind = kind;
@@ -79,6 +95,13 @@
       url.searchParams.set("seller",String(listing.agent_id || agent_id));
       inbox.href = url.pathname + url.search;
       $("result").hidden = false;
+      // Explicit opt-in only; re-publishing still requires a fresh server proof and wallet signature.
+      try {
+        if ($("remember").checked) window.localStorage.setItem(draftKey,JSON.stringify({
+          capability,price,currency,contact
+        }));
+        else window.localStorage.removeItem(draftKey);
+      } catch (_) { /* Do not block successful publication. */ }
       notify("Your genuine identity-signed offer was published. You need to check your public proposal inbox and renew this listing before it expires.", "success");
     } catch (error) {
       notify("Offer was not published: " + (error.message || String(error)), "error");
