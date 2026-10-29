@@ -13,11 +13,11 @@
     try { last = JSON.parse(localStorage.getItem(storeKey) || "null"); }
     catch (_) { last = null; }
     if (last && last.id) {
-      $("last").textContent = "Your last request ID: " + last.id + ". Requests expire after one hour.";
+      $("last").textContent = "Your last request ID: " + last.id + ". Requests expire after 24 hours (or on server restart).";
       cancel.hidden = false;
       $("buyer-matches").hidden = false;
     } else {
-      $("last").textContent = "Requests expire after one hour. No funds are reserved.";
+      $("last").textContent = "Requests expire after 24 hours (or on server restart). No funds are reserved.";
       cancel.hidden = true;
       $("buyer-matches").hidden = true;
     }
@@ -84,7 +84,7 @@
             last = {id:msg.request.id,buyer:identity,capability:msg.request.capability};
             try { localStorage.setItem(storeKey,JSON.stringify(last)); } catch (_) {}
             refreshLast();
-            notify("Published! Your identity-signed request is visible for one hour. No funds are reserved. Check offers carefully.", "success");
+            notify("Published! Your identity-signed request is visible for up to 24 hours. No funds are reserved. Check offers carefully.", "success");
             closeSocket(); done();
             $("refresh").click();
             refreshMatchedOffers();
