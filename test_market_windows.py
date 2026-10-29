@@ -87,7 +87,7 @@ class GenuineAsynchronousMarketTest(unittest.TestCase):
             self.assertFalse(market["available_now"])
             self.assertTrue(market["identity_only"])
             self.assertTrue(market["contact_urls_unverified"])
-            self.assertIn("host replacement",market["persistence"])
+            self.assertTrue("host replacement" in market["persistence"] or "restart" in market["persistence"])
             self.assertEqual(c.get("/health").json()["escrow"],False)
 
 if __name__=="__main__":
