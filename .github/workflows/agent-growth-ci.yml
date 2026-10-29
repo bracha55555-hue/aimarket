@@ -19,6 +19,8 @@ jobs:
       - run: python -m py_compile app.py
       - name: Verify N4 database save, reload and corruption detection
         run: python -m unittest -v test_n4store.py
+      - name: Verify multiple independently signed provider listings
+        run: python -m unittest -v test_signed_multi_offers.py
       - name: Verify signed MCP seller offer without WebSocket or server-side keys
         run: |
           python - <<'PY'
@@ -69,7 +71,7 @@ jobs:
               assert legacy("publish_signed_offer",args).status_code==400  # replay
               assert legacy("browse_signed_offers",{"capability":"unrelated"}).json()["result"]["structuredContent"]["count"]==0
               # Simulate expiry without waiting 12h
-              m.signed_offers[seller.address.lower()]["expires_at_unix"]=0
+              m.signed_offers[result["listing"]["offer_id"]]["expires_at_unix"]=0
               m.expire_stale_trades()
               assert c.get("/api/signed-offers").json()["count"]==0
               assert c.get("/api/market/stats").json()["events_since_start"]["signed_offers_published"]==1
