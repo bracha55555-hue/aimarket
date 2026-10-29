@@ -17,6 +17,8 @@ jobs:
           python-version: '3.11'
       - run: pip install -r requirements.txt httpx
       - run: python -m py_compile app.py
+      - name: Verify N4 database save, reload and corruption detection
+        run: python -m unittest -v test_n4store.py
       - name: Verify signed MCP seller offer without WebSocket or server-side keys
         run: |
           python - <<'PY'
