@@ -67,7 +67,7 @@ if not logger.handlers:
     logger.addHandler(_usage_handler)
 logger.propagate = False
 usage_started_at = datetime.now(timezone.utc).isoformat()
-usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0, "buyer_studio_views":0, "signed_offers_published":0, "intent_proposals_published":0, "intent_acceptances":0}
+usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0, "buyer_studio_views":0, "provider_studio_views":0, "seller_inbox_views":0, "offer_challenges_prepared":0, "buyer_intent_challenges_prepared":0, "seller_ack_challenges_prepared":0, "signed_offers_published":0, "intent_proposals_published":0, "intent_acceptances":0}
 def usage_event(kind):
     # Counts are process-local and contain NO wallet address, private key or IP.
     if kind in usage_events:
@@ -607,6 +607,18 @@ async def public_market_stats():
             "signed_offline_offers":len(signed_offers),
             "unsigned_payments_claimed":False,"nonbinding_intents_proposed":proposed,
             "nonbinding_intents_accepted":acknowledged,"events_since_start":dict(usage_events),
+            "business_funnel_events":{
+                "buyer_page_requests":usage_events["buyer_studio_views"],
+                "buyer_requests_signed":usage_events["requests_published"],
+                "provider_page_requests":usage_events["provider_studio_views"],
+                "valid_provider_signing_challenges":usage_events["offer_challenges_prepared"],
+                "provider_offers_signed":usage_events["signed_offers_published"],
+                "valid_buyer_proposal_challenges":usage_events["buyer_intent_challenges_prepared"],
+                "buyer_proposals_signed":usage_events["intent_proposals_published"],
+                "seller_inbox_page_requests":usage_events["seller_inbox_views"],
+                "valid_seller_ack_challenges":usage_events["seller_ack_challenges_prepared"],
+                "seller_acknowledgements_signed":usage_events["intent_acceptances"]},
+            "business_funnel_scope":"Anonymous event totals for this server process only. Includes tests, crawlers and MCP/REST calls; stages are not necessarily the same customers. No conversion rates, unique people or revenue inferred.",
             "note":"Event counts are not unique customers or confirmed revenue."}
 
 @app.get("/client/connect-agent.py")
@@ -795,6 +807,7 @@ async def seller_inbox_client_script():
 
 @app.get("/seller-inbox")
 async def seller_browser_inbox():
+    usage_event("seller_inbox_views")
     # Intents here are public metadata for the seller's signed identity, not private messages.
     return HTMLResponse("""<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -840,6 +853,7 @@ async def provider_studio_script():
 
 @app.get("/list-service")
 async def list_real_agent_service():
+    usage_event("provider_studio_views")
     # An operator-authorized wallet signature proves identity control, not skills or payment.
     return HTMLResponse("""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -1233,6 +1247,7 @@ async def handle_offer_tool(name, args):
         data["challenge_expires_at"]=int(time.time())+OFFER_CHALLENGE_SECONDS
         message=offer_signing_message(data)
         proof=hmac.new(OFFER_CHALLENGE_SECRET,message.encode("utf-8"),hashlib.sha256).hexdigest()
+        usage_event("offer_challenges_prepared")
         return {"sign_this_message_exactly":message,"challenge_proof":proof,
                 "signature_scheme":"EIP-191 personal_sign","expires_in_seconds":OFFER_CHALLENGE_SECONDS,
                 "next_tool":"publish_signed_offer","private_key_required_by_server":False,
@@ -1361,6 +1376,7 @@ async def handle_purchase_intent(name,args):
         fields={**terms,"nonce":secrets.token_hex(16),"challenge_expires_at":int(time.time())+OFFER_CHALLENGE_SECONDS}
         message=intent_signing_text("buyer",fields)
         proof=hmac.new(OFFER_CHALLENGE_SECRET,message.encode(),hashlib.sha256).hexdigest()
+        usage_event("buyer_intent_challenges_prepared")
         return {"sign_this_message_exactly":message,"challenge_proof":proof,"next_tool":"publish_purchase_intent",
                 "signature_scheme":"EIP-191 personal_sign","payment_verified":False,"notice":"Nonbinding identity-signed buyer proposal. No order or transfer."}
     if name=="publish_purchase_intent":
@@ -1415,6 +1431,7 @@ async def handle_purchase_intent(name,args):
                     "nonce":secrets.token_hex(16),"challenge_expires_at":int(time.time())+OFFER_CHALLENGE_SECONDS}
         message=intent_signing_text("seller",fields)
         proof=hmac.new(OFFER_CHALLENGE_SECRET,message.encode(),hashlib.sha256).hexdigest()
+        usage_event("seller_ack_challenges_prepared")
         return {"sign_this_message_exactly":message,"challenge_proof":proof,
                 "next_tool":"accept_purchase_intent","signature_scheme":"EIP-191 personal_sign",
                 "notice":"Acknowledge exact buyer terms only; no payment or confirmed fulfillment."}

@@ -54,6 +54,8 @@ jobs:
           node --check client/provider-studio.js
           node --check client/buyer-studio.js
           python -m unittest -v test_market_windows.py
+      - name: Verify real buyer and seller business funnel event counts with no identity or payment leakage
+        run: python -m unittest -v test_business_funnel.py
       - name: Verify browser seller reviews and separately signs genuine buyer proposals, no payment
         run: |
           node --check client/seller-inbox.js
