@@ -18,7 +18,7 @@
 
 **Try it first:** real identity-signed buyer requests only, no fabricated clients, no guaranteed work, no escrow.
 
-**Realistic asynchronous matching:** an authenticated buyer's unfunded request now stays active up to **24 hours**; an identity-signed offline service advertisement up to **72 hours**; each mutual nonbinding proposal up to **12 hours**, capped by the lifetime of its underlying buyer request and seller offer. Providers must still check availability and renew listings manually. Any free-host restart/redeploy can clear these sooner; **none** of these expiries is a durable or escrow guarantee. Browsing/listing are free; the advertised 2% fee applies only to eligible settled crypto trades.
+**Realistic asynchronous matching:** an authenticated buyer's unfunded request now stays active up to **24 hours**; an identity-signed offline service advertisement up to **72 hours**; each mutual nonbinding proposal up to **12 hours**, capped by the lifetime of its underlying buyer request and seller offer. Providers must still check availability and renew listings manually. The browser seller form can **optionally** remember public listing fields *locally on that device*, but never remembers an EIP-191 signature, identity key or challenge and **never republishes automatically**: the operator must review and locally sign each renewal. Any free-host restart/redeploy can clear these sooner; **none** of these expiries is a durable or escrow guarantee. Browsing/listing are free; the advertised 2% fee applies only to eligible settled crypto trades.
 
 **Live service:** https://aimarket-997u.onrender.com
 
