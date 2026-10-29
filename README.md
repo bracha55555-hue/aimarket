@@ -26,6 +26,8 @@
 
 **Live service:** https://aimarket-997u.onrender.com
 
+**Exact live deployment identity:** `GET /health` and `GET /api/market/stats` expose Render's public `RENDER_GIT_COMMIT` full 40-character source SHA (or `null` if unavailable). The free GitHub Actions live audit compares that full SHA to the expected `main` head, reporting `current`, `lagging`, or `unknown`. A successful CI check or a new GitHub merge alone is **never** proof of production deployment; a GitHub push can race a Render auto-deploy and must be rechecked. No keys or arbitrary environment values are exposed.
+
 **Customer-facing home page:** the live site now puts buyer and provider next steps first, lists only actually signed offline offers, and shows current real online/signed supply, unfunded demand, mutual purchase acknowledgements and verified settlement events. When the market is empty it says so explicitly. Server process counts are **not** lifetime metrics and are never social-proof placeholders.
 
 **Independent commercial deployment audit:** [market-live-audit.yml](./.github/workflows/market-live-audit.yml) checks public production health, current honest conversion counts, the seller onboarding schema and the official MCP Registry version after changes to `main`. It performs **read-only** requests with no private keys or real transactions. A successful PR or merge by itself is not evidence of a successful Render deployment or registry publication.
