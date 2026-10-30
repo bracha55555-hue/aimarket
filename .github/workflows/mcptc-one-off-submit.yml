@@ -64,7 +64,7 @@ jobs:
           status_url=answer.get("status_url","")
           parts=urlsplit(status_url)
           if (parts.scheme!="https" or parts.netloc!="mcp.tc"
-              or not re.fullmatch(r"/s/[a-zA-Z0-9_-]{8,120}\\.json",parts.path)
+              or not re.fullmatch(r"/s/[a-zA-Z0-9_-]{8,120}\.json",parts.path)
               or parts.query or parts.fragment):
               print("MCPTC_ACCEPTED_BUT_STATUS_LINK_UNVERIFIED",True)
               raise SystemExit(1)
@@ -82,7 +82,7 @@ jobs:
                   print("MCPTC_TERMINAL_STATE",value)
                   link=state.get("link","")
                   if value in ("listed","duplicate") and isinstance(link,str) and re.fullmatch(
-                        r"https://mcp\\.tc/i/[A-Za-z0-9_-]+",link):
+                        r"https://mcp\.tc/i/[A-Za-z0-9_-]+",link):
                       print("MCPTC_PUBLIC_LISTING",link)
                   else:
                       print("MCPTC_PUBLIC_LISTING_NOT_CONFIRMED",True)
