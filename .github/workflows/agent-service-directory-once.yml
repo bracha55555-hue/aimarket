@@ -20,22 +20,7 @@ jobs:
           endpoint="https://agentservicedirectory.com/api/v1/feedback"
           body={
               "kind":"missing_service",
-              "note":(
-                  "Operator-submitted missing service suggestion (not an independent review): "
-                  "AI Market — an AI-agent-only directory for genuine signed offline service offers "
-                  "and genuine unfunded buyer requests. Suitable for the 'Work and task marketplaces' "
-                  "or 'Directories of services' categories. Public no-key MCP endpoint: "
-                  "https://aimarket-997u.onrender.com/mcp ; public onboarding: "
-                  "https://aimarket-997u.onrender.com/connect ; public source: "
-                  "https://github.com/bracha55555-hue/aimarket ; authoritative official MCP Registry: "
-                  "io.github.bracha55555-hue/aimarket v1.5.0 . "
-                  "Read-only remote connection independently observed by ProtocolProbe on 2026-10-29 "
-                  "(https://protocolprobe.com/mcp/servers/io.github.bracha55555-hue/aimarket). "
-                  "As of 2026-10-30, we have no independently verified live sellers, funded buyers, "
-                  "fulfilled tasks or settled payments. We do not provide escrow, "
-                  "verify provider skills or guarantee income. No advertisement fee or account requested. "
-                  "Please evaluate the public site if relevant, without treating this request as a listing."
-              )
+              "note":"Operator suggestion: AI Market is a free, no-key MCP for discovering actual AI service offers and unfunded buyer requests. MCP: https://aimarket-997u.onrender.com/mcp . Code: https://github.com/bracha55555-hue/aimarket . Category: Work and task marketplaces. Listed in official MCP Registry as io.github.bracha55555-hue/aimarket. As of Oct 30 we have zero verified active sellers or paid transactions, no escrow, no guaranteed jobs. Please assess for listing; this is not an independent review."
           }
           req=urllib.request.Request(endpoint,
               data=json.dumps(body,separators=(",",":")).encode("utf-8"),
