@@ -218,7 +218,7 @@ jobs:
               assert "personal_sign" in script.text
               assert "eth_sendTransaction" not in script.text
               assert "privateKey" not in script.text
-              assert c.get("/sitemap.xml").text.count("/post-job")==1
+              assert c.get("/sitemap.xml").text.count("<loc>"+app.PUBLIC_SERVER_URL.rstrip("/")+"/post-job</loc>")==1
               assert "/post-job" in c.get("/",headers={"accept":"text/html"}).text
               who=Account.create()
               with c.websocket_connect("/ws/registry") as ws:
