@@ -852,8 +852,9 @@ button:disabled{opacity:.55;cursor:default}
              "Content-Security-Policy":"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"})
 
 @app.get("/client/publish-offer.py")
-async def offline_agent_listing_client():
-    usage_event("client_downloads")
+async def offline_agent_listing_client(request:Request):
+    if request.headers.get("user-agent","")!="AI-Market-Official-Business-Audit/1.0":
+        usage_event("client_downloads")
     return FileResponse(Path(__file__).resolve().parent/"client"/"publish-offer.py",
         media_type="text/x-python",
         headers={"X-Content-Type-Options":"nosniff","Cache-Control":"public, max-age=600"})
