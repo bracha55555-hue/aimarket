@@ -204,6 +204,80 @@ jobs:
           except (OSError,ValueError,TimeoutError) as exc:
               listing={"status":"unverified","error":type(exc).__name__,"listed":False}
           result["mcptc_directory"]=listing
+          # Check actual public no-key onboarding deployment. No POSTs, generated visitors or auto-enrollment.
+          connection={"status":"unverified","available":False}
+          try:
+              req=urllib.request.Request(base+"/connect",headers={
+                  "User-Agent":"AI-Market-Official-Business-Audit/1.0","Accept":"text/html"})
+              with urllib.request.urlopen(req,timeout=20) as response:
+                  html=response.read(180000).decode("utf-8","replace")
+                  code=response.status
+              required=("codex mcp add ai-market --url "+base+"/mcp",
+                        "claude mcp add --transport http ai-market "+base+"/mcp",
+                        "No unsolicited messages","/client/connect-guide.js")
+              complete=(code==200 and all(k in html for k in required))
+              connection={"status":"deployed" if complete else "incomplete",
+                          "available":complete,
+                          "read_only_check":True,
+                          "one_command_codex_and_claude":complete,
+                          "no_auto_outreach":True}
+          except urllib.error.HTTPError as exc:
+              connection={"status":"http_error","available":False,"error":"HTTP_"+str(exc.code)}
+          except (OSError,ValueError,TimeoutError) as exc:
+              connection={"status":"unknown","available":False,"error":type(exc).__name__}
+          result["production_agent_connect_guide"]=connection
+          # The genuine provider outreach issue is public and read-only. Counts are NOT unique agents.
+          github_outreach={"status":"unverified","comment_events":None}
+          try:
+              url="https://api.github.com/repos/bracha55555-hue/aimarket/issues/34/comments?per_page=100"
+              req=urllib.request.Request(url,headers={
+                  "User-Agent":"AI-Market-Official-Business-Audit/1.0","Accept":"application/vnd.github+json"})
+              with urllib.request.urlopen(req,timeout=20) as response:
+                  data=json.load(response)
+              if isinstance(data,list):
+                  github_outreach={"status":"checked","comment_events":len(data),
+                                   "is_unique_real_provider_count":False}
+          except urllib.error.HTTPError as exc:
+              github_outreach={"status":"http_error","error":"HTTP_"+str(exc.code),"comment_events":None}
+          except (OSError,ValueError,TimeoutError) as exc:
+              github_outreach={"status":"unknown","error":type(exc).__name__,"comment_events":None}
+          result["real_agent_feedback_issue"]=github_outreach
+          # We posted one transparent request for relevant voluntary operator introductions.
+          # Check the public human-help queue; NEVER publish or repeat it from this audit.
+          # No request body, contact details, usernames, credentials or replies are logged.
+          liaison={"status":"unverified","request_visible":False,"public_reply_count":None}
+          try:
+              url="https://commons.dooza.ai/api/human-requests?agent=aimarket-operator&limit=50"
+              req=urllib.request.Request(url,headers={
+                  "User-Agent":"AI-Market-Official-Business-Audit/1.0","Accept":"application/json"})
+              with urllib.request.urlopen(req,timeout=20) as response:
+                  data=json.load(response)
+              rows=data.get("requests",[]) if isinstance(data,dict) else []
+              matching=[row for row in rows if isinstance(row,dict)
+                        and row.get("agent")=="aimarket-operator"
+                        and isinstance(row.get("title"),str)
+                        and "independent AI-agent operators" in row["title"]]
+              if matching and isinstance(matching[0].get("id"),str):
+                  entry_id=matching[0]["id"]
+                  replies_url=("https://commons.dooza.ai/api/entries?reply_to="
+                               +urllib.parse.quote(entry_id,safe="")+"&limit=100")
+                  req=urllib.request.Request(replies_url,headers={
+                      "User-Agent":"AI-Market-Official-Business-Audit/1.0","Accept":"application/json"})
+                  with urllib.request.urlopen(req,timeout=20) as response:
+                      reply_data=json.load(response)
+                  replies=reply_data.get("entries",[]) if isinstance(reply_data,dict) else []
+                  liaison={"status":"public_request_visible","request_visible":True,
+                           "public_reply_count":len(replies) if isinstance(replies,list) else None,
+                           "replies_are_not_verified_operators":True}
+              else:
+                  liaison={"status":"not_found","request_visible":False,"public_reply_count":0}
+          except urllib.error.HTTPError as exc:
+              liaison={"status":"http_error","request_visible":False,"error":"HTTP_"+str(exc.code),
+                       "public_reply_count":None}
+          except (OSError,ValueError,TimeoutError) as exc:
+              liaison={"status":"unknown","request_visible":False,"error":type(exc).__name__,
+                       "public_reply_count":None}
+          result["real_agent_human_introduction"]=liaison
           print("AI_MARKET_VERIFIABLE_BUSINESS_AUDIT",json.dumps(result,sort_keys=True))
           print("Important: these are read-only observations, not unique user counts or proven lifetime revenue.")
           PY

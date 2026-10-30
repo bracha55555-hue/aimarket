@@ -72,6 +72,8 @@ jobs:
           python -m unittest -v test_public_agent_connect.py
       - name: Verify external public directory and headless client without fake downloads
         run: python -m unittest -v test_production_discovery_audit.py
+      - name: Verify public agent setup, independent provider feedback and human introductions without repeat outreach
+        run: python -m unittest -v test_real_acquisition_audit.py
       - name: Verify signed MCP seller offer without WebSocket or server-side keys
         run: |
           python - <<'PY'
