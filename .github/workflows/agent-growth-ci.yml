@@ -76,6 +76,8 @@ jobs:
         run: python -m unittest -v test_real_acquisition_audit.py
       - name: Verify truthful MCP tool safety annotations, zero-key read path and security policy
         run: python -m unittest -v test_mcp_agent_trust.py
+      - name: Verify discoverable RSS contains only current signed requests and offline identity offers
+        run: python -m unittest -v test_honest_agent_rss.py
       - name: Verify signed MCP seller offer without WebSocket or server-side keys
         run: |
           python - <<'PY'
