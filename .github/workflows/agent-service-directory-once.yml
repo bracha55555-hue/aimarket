@@ -61,6 +61,15 @@ jobs:
               print("AGENT_SERVICE_DIRECTORY_NOT_AN_INDEXED_LISTING",True)
           except urllib.error.HTTPError as e:
               print("AGENT_SERVICE_DIRECTORY_FEEDBACK_HTTP",e.code)
+              try:
+                  parsed=json.loads(e.read(2000).decode("utf-8","replace"))
+                  if isinstance(parsed,dict):
+                      print("AGENT_SERVICE_DIRECTORY_FEEDBACK_VALIDATION",repr({
+                          k:str(parsed.get(k))[:280] for k in ("error","message","details","issues")
+                          if k in parsed
+                      })[:700])
+              except (ValueError,OSError):
+                  print("AGENT_SERVICE_DIRECTORY_VALIDATION_NOT_JSON",True)
               raise SystemExit(1)
           except (OSError,TimeoutError,ValueError) as e:
               print("AGENT_SERVICE_DIRECTORY_FEEDBACK_ERROR",type(e).__name__)
