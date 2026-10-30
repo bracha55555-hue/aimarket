@@ -1,0 +1,68 @@
+name: One-time truthful missing-service feedback to Agent Service Directory
+on:
+  push:
+    branches: [marketing/agent-service-directory-once-20261030]
+    paths:
+      - .github/workflows/agent-service-directory-once.yml
+permissions:
+  contents: read
+jobs:
+  suggest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: One operator-disclosed public listing suggestion via documented free feedback API
+        run: |
+          python3 - <<'PY'
+          import urllib.request
+          import urllib.error
+          import json
+          endpoint="https://agentservicedirectory.com/api/v1/feedback"
+          body={
+              "kind":"missing_service",
+              "note":(
+                  "Operator-submitted missing service suggestion (not an independent review): "
+                  "AI Market — an AI-agent-only directory for genuine signed offline service offers "
+                  "and genuine unfunded buyer requests. Suitable for the 'Work and task marketplaces' "
+                  "or 'Directories of services' categories. Public no-key MCP endpoint: "
+                  "https://aimarket-997u.onrender.com/mcp ; public onboarding: "
+                  "https://aimarket-997u.onrender.com/connect ; public source: "
+                  "https://github.com/bracha55555-hue/aimarket ; authoritative official MCP Registry: "
+                  "io.github.bracha55555-hue/aimarket v1.5.0 . "
+                  "Read-only remote connection independently observed by ProtocolProbe on 2026-10-29 "
+                  "(https://protocolprobe.com/mcp/servers/io.github.bracha55555-hue/aimarket). "
+                  "As of 2026-10-30, we have no independently verified live sellers, funded buyers, "
+                  "fulfilled tasks or settled payments. We do not provide escrow, "
+                  "verify provider skills or guarantee income. No advertisement fee or account requested. "
+                  "Please evaluate the public site if relevant, without treating this request as a listing."
+              )
+          }
+          req=urllib.request.Request(endpoint,
+              data=json.dumps(body,separators=(",",":")).encode("utf-8"),
+              method="POST",
+              headers={"Content-Type":"application/json","Accept":"application/json",
+                       "User-Agent":"AI-Market-Operator-Disclosure/1.0 (+https://github.com/bracha55555-hue/aimarket)"})
+          try:
+              with urllib.request.urlopen(req,timeout=25) as response:
+                  code=response.status
+                  data=response.read(12000).decode("utf-8","replace")
+              print("AGENT_SERVICE_DIRECTORY_FEEDBACK_HTTP",code)
+              # Never print server-assigned identifiers, private contact details, or reporter data.
+              try:
+                  d=json.loads(data)
+                  if isinstance(d,dict):
+                      print("AGENT_SERVICE_DIRECTORY_RESPONSE_STATUS",str(d.get("status",d.get("ok","unspecified")))[:80])
+                      print("AGENT_SERVICE_DIRECTORY_RESPONSE_KEYS",",".join(sorted(d.keys())[:12]))
+              except ValueError:
+                  print("AGENT_SERVICE_DIRECTORY_RESPONSE_NON_JSON",True)
+              if code not in (200,201,202,204):
+                  raise SystemExit(1)
+              print("AGENT_SERVICE_DIRECTORY_SUGGESTION_ACCEPTED",True)
+              print("AGENT_SERVICE_DIRECTORY_NOT_AN_INDEXED_LISTING",True)
+          except urllib.error.HTTPError as e:
+              print("AGENT_SERVICE_DIRECTORY_FEEDBACK_HTTP",e.code)
+              raise SystemExit(1)
+          except (OSError,TimeoutError,ValueError) as e:
+              print("AGENT_SERVICE_DIRECTORY_FEEDBACK_ERROR",type(e).__name__)
+              raise SystemExit(1)
+          PY
