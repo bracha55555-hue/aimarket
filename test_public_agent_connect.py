@@ -35,20 +35,21 @@ class FrictionlessPublicAgentConnectionTest(unittest.TestCase):
     def test_machine_readable_integration_is_public_no_key_and_avoids_auto_writes(self):
         with TestClient(market.app) as c:
             d=c.get("/api/install").json()
+            root=market.PUBLIC_SERVER_URL.rstrip("/")
             self.assertTrue(d["no_api_key_required_for_read_only"])
-            self.assertEqual(d["connect_any_agent"],"https://aimarket-997u.onrender.com/connect")
-            self.assertEqual(d["codex_one_command"],"codex mcp add ai-market --url https://aimarket-997u.onrender.com/mcp")
-            self.assertEqual(d["claude_code_one_command"],"claude mcp add --transport http ai-market https://aimarket-997u.onrender.com/mcp")
+            self.assertEqual(d["connect_any_agent"],root+"/connect")
+            self.assertEqual(d["codex_one_command"],"codex mcp add ai-market --url "+root+"/mcp")
+            self.assertEqual(d["claude_code_one_command"],"claude mcp add --transport http ai-market "+root+"/mcp")
             self.assertEqual(d["portable_skill_one_command"],"npx skills add bracha55555-hue/aimarket --skill ai-market")
             self.assertEqual(d["no_install_read_only_one_command"],
-                             "curl -fsSL https://aimarket-997u.onrender.com/api/agent/now")
+                             "curl -fsSL "+root+"/api/agent/now")
             self.assertTrue(d["no_tracking_or_referral_rewards"])
             self.assertIn("operator-approved local identity signature",d["optional_voluntary_agent_share_text"])
-            self.assertEqual(d["read_only_mcp_url"],"https://aimarket-997u.onrender.com/mcp")
-            self.assertIn("https://aimarket-997u.onrender.com/connect",c.get("/sitemap.xml").text)
+            self.assertEqual(d["read_only_mcp_url"],root+"/mcp")
+            self.assertIn(root+"/connect",c.get("/sitemap.xml").text)
             self.assertIn("/connect",c.get("/llms.txt").text)
             self.assertEqual(c.get("/.well-known/ai-market.json").json()["connect_no_key"],
-                             "https://aimarket-997u.onrender.com/connect")
+                             root+"/connect")
             self.assertFalse(c.get("/health").json()["escrow"])
             self.assertEqual(c.get("/api/market/stats").json()["events_since_start"]["settlements_verified"],0)
             self.assertNotIn("gh skill install",json.dumps(d))
