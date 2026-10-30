@@ -47,6 +47,33 @@ jobs:
           print("PUBLIC_FORM_COUNT",len(p.forms))
           print("PUBLIC_FORM_DETAILS",repr(p.forms)[:6500])
           print("PUBLIC_FORM_SCRIPT_PATHS",repr(p.scripts[:8])[:1600])
+          # Extra read-only independent public checks; never submit or register another directory entry.
+          import json
+          for label,checkurl in (
+              ("MCPREPOSITORY_PUBLIC_PAGE","https://mcprepository.com/bracha55555-hue/aimarket"),
+              ("BOTMARKET_MCP_SEARCH","https://botmarket.bot/v1/mcps?q=AI%20Market"),
+              ("RENDER_HEALTH","https://aimarket-997u.onrender.com/health"),
+          ):
+              try:
+                  req=urllib.request.Request(checkurl,headers={
+                      "User-Agent":"AI-Market-Official-ReadOnly-Discovery-Check/1.0",
+                      "Accept":"application/json, text/html"})
+                  with urllib.request.urlopen(req,timeout=25) as response:
+                      b=response.read(200000).decode("utf-8","replace")
+                      status=response.status
+                  exact="bracha55555-hue/aimarket" in b or "aimarket-997u.onrender.com/mcp" in b
+                  if label=="RENDER_HEALTH":
+                      try:
+                          d=json.loads(b)
+                          print("PUBLIC_CHECK",label,status,"git_sha",d.get("deployed_git_sha"),"online",d.get("status"))
+                      except (ValueError,TypeError):
+                          print("PUBLIC_CHECK",label,status,"unparseable")
+                  else:
+                      print("PUBLIC_CHECK",label,status,"references_exact_aimarket",exact)
+              except urllib.error.HTTPError as e:
+                  print("PUBLIC_CHECK",label,"http",e.code)
+              except (OSError,TimeoutError,ValueError) as e:
+                  print("PUBLIC_CHECK",label,type(e).__name__)
           print("PUBLIC_FORM_CONTENT_FLAGS",{
               "NextFlight":"__next_f" in body,
               "submission":"/submit" in body,
