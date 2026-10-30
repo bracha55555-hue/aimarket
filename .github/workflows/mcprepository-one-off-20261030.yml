@@ -1,0 +1,54 @@
+name: Inspect public no-account MCPRepository submission form once
+on:
+  push:
+    branches:
+      - marketing/mcprepository-one-off-20261030
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read public submit page, inspect safe form protocol, no submissions
+        run: |
+          python3 - <<'PY'
+          from html.parser import HTMLParser
+          import urllib.request
+          class Forms(HTMLParser):
+              def __init__(self):
+                  super().__init__();self.forms=[];self.cur=None;self.scripts=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=="form":
+                      self.cur={"action":a.get("action"),"method":a.get("method"),"inputs":[],"buttons":[]}
+                      self.forms.append(self.cur)
+                  elif tag in ("input","textarea","select","button") and self.cur is not None:
+                      self.cur["inputs" if tag!="button" else "buttons"].append({
+                          "tag":tag,"name":a.get("name"),"type":a.get("type"),
+                          "placeholder":a.get("placeholder"),"id":a.get("id"),
+                          "required":("required" in a)})
+                  elif tag=="script" and a.get("src"):
+                      self.scripts.append(a["src"])
+              def handle_endtag(self,tag):
+                  if tag=="form": self.cur=None
+          url="https://mcprepository.com/submit"
+          req=urllib.request.Request(url,headers={
+              "User-Agent":"AI-Market-MCPRepository-Form-Inspection/1.0 (+https://github.com/bracha55555-hue/aimarket)",
+              "Accept":"text/html"})
+          with urllib.request.urlopen(req,timeout=25) as r:
+              body=r.read(160000).decode("utf-8","replace")
+              print("PUBLIC_FORM_HTTP",r.status)
+              print("PUBLIC_FORM_EFFECTIVE_URL",r.url)
+          p=Forms();p.feed(body)
+          print("PUBLIC_FORM_COUNT",len(p.forms))
+          print("PUBLIC_FORM_DETAILS",repr(p.forms)[:6500])
+          print("PUBLIC_FORM_SCRIPT_PATHS",repr(p.scripts[:8])[:1600])
+          print("PUBLIC_FORM_CONTENT_FLAGS",{
+              "NextFlight":"__next_f" in body,
+              "submission":"/submit" in body,
+              "form_url_example":"https://github.com/JetBrains/mcp-jetbrains" in body,
+              "recaptcha":"recaptcha" in body.lower(),
+              "turnstile":"turnstile" in body.lower()
+          })
+          PY
