@@ -90,6 +90,23 @@ jobs:
                       "feature_visible":needle in body}
               except (OSError,ValueError,TimeoutError) as exc:
                   result["production_browser_funnel"][page]={"error":type(exc).__name__}
+          # Verify actual production client availability; this official audit must not count as adoption.
+          try:
+              req=urllib.request.Request(base+"/client/publish-offer.py",headers={
+                  "User-Agent":"AI-Market-Official-Business-Audit/1.0","Accept":"text/x-python"})
+              with urllib.request.urlopen(req,timeout=20) as response:
+                  script=response.read(40000).decode("utf-8","replace")
+                  ctype=response.headers.get("Content-Type","").lower()
+              result["production_headless_provider_client"]={
+                  "status":"available" if response.status==200 and "text/x-python" in ctype else "unexpected",
+                  "identity_only_explicit_approval":
+                      all(text in script for text in
+                          ("--publish","validate_challenge","eth_account","NoCrossOriginRedirect")),
+                  "no_download_or_key_actions_performed":True}
+          except urllib.error.HTTPError as exc:
+              result["production_headless_provider_client"]={"error":"HTTP_"+str(exc.code)}
+          except (OSError,ValueError,TimeoutError) as exc:
+              result["production_headless_provider_client"]={"error":type(exc).__name__}
           stats,error=fetch(base+"/api/market/stats")
           if stats:
               e=stats.get("events_since_start") or {}
@@ -160,6 +177,33 @@ jobs:
                   directory["checked"] = directory.get("checked", []) + [
                       {"url":url,"error":type(exc).__name__}]
           result["allagents_directory"]=directory
+          # A third-party directory submission was acknowledged as pending on 2026-10-30.
+          # Check actual public discoverability, never count queue acceptance as a listing.
+          listing={"status":"not_publicly_verified","listed":False}
+          try:
+              uri="https://mcp.tc/v0.1/servers?search=AI%20Market&limit=100"
+              req=urllib.request.Request(uri,headers={
+                  "User-Agent":"AI-Market-Official-Business-Audit/1.0","Accept":"application/json"})
+              with urllib.request.urlopen(req,timeout=20) as response:
+                  data=json.load(response)
+              if isinstance(data,dict):
+                  matches=[]
+                  for row in data.get("servers",[]):
+                      server=row.get("server",row) if isinstance(row,dict) else {}
+                      if not isinstance(server,dict): continue
+                      if any(isinstance(remote,dict) and remote.get("url")==base+"/mcp"
+                             for remote in server.get("remotes",[])):
+                          matches.append(server.get("name","unknown"))
+                  if matches:
+                      listing={"status":"public_listing_verified","listed":True,
+                               "exact_endpoint_match":True,"server_names":matches[:3]}
+                  else:
+                      listing={"status":"not_yet_visible","listed":False}
+          except urllib.error.HTTPError as exc:
+              listing={"status":"http_error","error":"HTTP_"+str(exc.code),"listed":False}
+          except (OSError,ValueError,TimeoutError) as exc:
+              listing={"status":"unverified","error":type(exc).__name__,"listed":False}
+          result["mcptc_directory"]=listing
           print("AI_MARKET_VERIFIABLE_BUSINESS_AUDIT",json.dumps(result,sort_keys=True))
           print("Important: these are read-only observations, not unique user counts or proven lifetime revenue.")
           PY

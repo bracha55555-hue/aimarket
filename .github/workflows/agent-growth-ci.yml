@@ -66,6 +66,12 @@ jobs:
           python -m unittest -v test_seller_browser_ack.py
       - name: Verify zero-browser, opt-in, private-identity signed offline provider client against server
         run: python -m unittest -v test_headless_provider_client.py
+      - name: Verify free no-key one-command agent setup and voluntary nontracking sharing
+        run: |
+          node --check client/connect-guide.js
+          python -m unittest -v test_public_agent_connect.py
+      - name: Verify external public directory and headless client without fake downloads
+        run: python -m unittest -v test_production_discovery_audit.py
       - name: Verify signed MCP seller offer without WebSocket or server-side keys
         run: |
           python - <<'PY'
@@ -320,7 +326,9 @@ jobs:
               assert manifest["portable_agent_skill"].endswith("/skills/ai-market/SKILL.md")
               installer=client.get("/api/install").json()
               assert installer["mcp_json"]["mcpServers"]["ai-market"]["url"].endswith("/mcp")
-              assert "gh skill install" in installer["github_cli_skill_install"]
+              assert installer["portable_skill_cli"]=="npx skills add bracha55555-hue/aimarket --skill ai-market"
+              assert installer["no_api_key_required_for_read_only"] is True
+              assert installer["connect_any_agent"].endswith("/connect")
               assert client.get("/sitemap.xml").text.count("SKILL.md") == 1
               assert "/skills/ai-market/SKILL.md" in client.get("/llms.txt").text
               import hashlib
