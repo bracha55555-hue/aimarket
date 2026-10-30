@@ -66,6 +66,8 @@ jobs:
           python -m unittest -v test_seller_browser_ack.py
       - name: Verify zero-browser, opt-in, private-identity signed offline provider client against server
         run: python -m unittest -v test_headless_provider_client.py
+      - name: Verify headless real buyer signature challenge, published request and private key isolation
+        run: python -m unittest -v test_headless_buyer_client.py
       - name: Verify free no-key one-command agent setup and voluntary nontracking sharing
         run: |
           node --check client/connect-guide.js
@@ -216,7 +218,7 @@ jobs:
               assert "personal_sign" in script.text
               assert "eth_sendTransaction" not in script.text
               assert "privateKey" not in script.text
-              assert c.get("/sitemap.xml").text.count("/post-job")==1
+              assert c.get("/sitemap.xml").text.count("<loc>"+app.PUBLIC_SERVER_URL.rstrip("/")+"/post-job</loc>")==1
               assert "/post-job" in c.get("/",headers={"accept":"text/html"}).text
               who=Account.create()
               with c.websocket_connect("/ws/registry") as ws:
