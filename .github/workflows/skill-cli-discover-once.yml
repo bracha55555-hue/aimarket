@@ -40,6 +40,6 @@ jobs:
           npx --yes skills@1.7.4 add bracha55555-hue/aimarket --skill ai-market -a codex -y 2>&1 | tee /tmp/ai-market-skill-install.txt
           found="$(find -L . -name SKILL.md -type f -print | head -n 1)"
           test -n "$found"
-          grep -q '^name: ai-market "$found"
+          grep -q "name: ai-market" "$found"
           grep -q 'aimarket-997u.onrender.com' "$found"
           echo 'SKILLS_CLI_REAL_CODEX_INSTALL_VERIFIED=1'
