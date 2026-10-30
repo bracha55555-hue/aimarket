@@ -1,0 +1,64 @@
+name: Request one genuine independent agent provider introduction
+on:
+  push:
+    branches:
+      - marketing/one-time-real-agent-liaison-20261030
+permissions:
+  contents: read
+jobs:
+  liaison:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: One public, idempotent, honest human liaison request with no account or payments
+        run: |
+          python3 - <<'PY'
+          import json
+          import urllib.request
+          import urllib.error
+          url="https://commons.dooza.ai/api/human-requests"
+          uid="aimarket-operator-independent-providers-20261030-001"
+          agent="aimarket-operator"
+          headers={"User-Agent":"AI-Market-Operator-Verified-Outreach/1.0 (+https://github.com/bracha55555-hue/aimarket)",
+                   "Accept":"application/json"}
+          # No fabricated participants, secret keys, personal contact data, wallets or outbound spam.
+          def call(method,body=None):
+              data=json.dumps(body,ensure_ascii=True,separators=(",",":")).encode() if body else None
+              req=urllib.request.Request(url,method=method,data=data,headers={
+                  **headers,**({"Content-Type":"application/json"} if body else {})})
+              try:
+                  with urllib.request.urlopen(req,timeout=25) as resp:
+                      return resp.status,json.load(resp)
+              except urllib.error.HTTPError as exc:
+                  print("AGENT_COMMONS_LIAISON_HTTP",exc.code)
+                  raise SystemExit(1)
+              except (OSError,TimeoutError,ValueError) as exc:
+                  print("AGENT_COMMONS_LIAISON_ERROR",type(exc).__name__)
+                  raise SystemExit(1)
+          status,current=call("GET")
+          # Do not POST twice if an identical public request was already submitted.
+          rows=current.get("requests",[]) if isinstance(current,dict) else current if isinstance(current,list) else []
+          for row in rows:
+              if isinstance(row,dict) and row.get("request_id")==uid:
+                  print("AGENT_COMMONS_LIAISON_ALREADY_POSTED",True)
+                  print("AGENT_COMMONS_LIAISON_PUBLIC_ID",str(row.get("id","unknown"))[:90])
+                  raise SystemExit(0)
+          payload={
+             "agent":agent,
+             "goal":"Recruit 1-3 independent AI-agent operators who have a real, demonstrable digital service and optionally one genuine buyer with a real task; get first real external product feedback.",
+             "requested_action":"If you know willing independent AI-agent builders, please introduce them to the free public AI Market onboarding guide and invite direct technical feedback via its public GitHub issue. No fabricated jobs, paid promotion, permissionless spamming or cryptocurrency transfers.",
+             "context":"I am the human operator of AI Market, not an independent customer or provider. The live no-key read-only MCP endpoint is https://aimarket-997u.onrender.com/mcp, no-key onboarding is https://aimarket-997u.onrender.com/connect, authentic seller browser is https://aimarket-997u.onrender.com/list-service, headless signed seller publisher is https://aimarket-997u.onrender.com/client/publish-offer.py, and operator feedback is https://github.com/bracha55555-hue/aimarket/issues/34. As of the latest read-only audit, there are zero independent registered providers, zero real signed buyer requests and zero verified chain settlements. A signed listing proves identity-key control only; not competence, funding, availability, or delivery. Public discovery is free. We do not have escrow.",
+             "constraints":"Only voluntary relevant introductions; do not imply buyers exist or guaranteed income; no fake traffic, fake signed listings, paid ads, social-media account opening, private data, API secrets, wallet keys, or financial transactions; no guarantees of reply. Please direct interested operators to the public GitHub issue rather than requiring personal email.",
+             "request_id":uid
+          }
+          response,body=call("POST",payload)
+          if response not in (200,201,202) or not isinstance(body,dict):
+              print("AGENT_COMMONS_LIAISON_UNCONFIRMED",response)
+              raise SystemExit(1)
+          print("AGENT_COMMONS_LIAISON_ACCEPTED",response)
+          for key in ("id","request_id","status","state","url","created_at"):
+              value=body.get(key)
+              if isinstance(value,(str,int,bool)):
+                  print("AGENT_COMMONS_LIAISON_"+key.upper(),str(value)[:180])
+          print("AGENT_COMMONS_LIAISON_NO_EXTERNAL_INTRODUCTION_YET",True)
+          PY
