@@ -77,7 +77,7 @@ class HonestRSSForIndependentAgents(unittest.TestCase):
 
     def test_feed_is_both_human_and_agent_discoverable(self):
         with TestClient(m.app) as c:
-            self.assertIn("/feed.xml",c.get("/").text)
+            self.assertIn("/feed.xml",c.get("/",headers={"accept":"text/html"}).text)
             self.assertIn("/feed.xml",c.get("/sitemap.xml").text)
             self.assertIn("/feed.xml",c.get("/llms.txt").text)
             root=m.PUBLIC_SERVER_URL.rstrip("/")
