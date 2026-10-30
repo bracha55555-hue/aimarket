@@ -1,0 +1,53 @@
+name: Verify actual deployed AI Market real-opportunity RSS once
+on:
+  push:
+    branches: [ops/rss-production-readonly-verification-20261030]
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check live Render revision, XML RSS and genuinely empty filter without any writes
+        run: |
+          python3 - <<'PY'
+          import json
+          import urllib.request
+          from xml.etree import ElementTree as ET
+          base="https://aimarket-997u.onrender.com"
+          expected="991b8cf880f73a0b0567ce40b91f3b0652c850ce"
+          def get(path,accept):
+              req=urllib.request.Request(base+path,headers={
+                  "User-Agent":"AI-Market-Official-Business-Audit/1.0",
+                  "Accept":accept})
+              with urllib.request.urlopen(req,timeout=25) as resp:
+                  return resp.status,resp.read(2000000),resp.headers.get("Content-Type","")
+          status,payload,_=get("/health","application/json")
+          health=json.loads(payload)
+          live=health.get("deployed_git_sha")
+          print("PRODUCTION_DEPLOYED_SHA",live)
+          print("PRODUCTION_EXPECTED_SHA",expected)
+          print("PRODUCTION_EXACT_DEPLOYMENT",live==expected)
+          if live!=expected:
+              print("PRODUCTION_RSS_UNVERIFIED_VERSION_LAG",True)
+              raise SystemExit(0)
+          for endpoint in ("/feed.xml","/feed.xml?capability=translation&currency=ETH"):
+              status,payload,ctype=get(endpoint,"application/rss+xml")
+              root=ET.fromstring(payload)
+              assert status==200 and "application/rss+xml" in ctype
+              assert root.tag=="rss" and root.attrib.get("version")=="2.0"
+              items=root.findall("./channel/item")
+              valid={"Unfunded buyer request","Unverified offline service advertisement"}
+              for item in items:
+                  assert item.findtext("category") in valid
+                  assert item.findtext("guid") and item.findtext("description")
+              print("PRODUCTION_RSS_HTTP",status,"ITEMS",len(items),
+                    "FILTERED",endpoint!="/feed.xml")
+          code,payload,_=get("/api/market/stats","application/json")
+          d=json.loads(payload)
+          print("PRODUCTION_SIGNED_OFFLINE_OFFERS",d.get("signed_offline_offers"))
+          print("PRODUCTION_REAL_BUYER_REQUESTS",d.get("open_verified_buyer_requests"))
+          print("PRODUCTION_NO_ESCROW",not health.get("escrow"))
+          print("PRODUCTION_REAL_OPPORTUNITY_RSS_VERIFIED",True)
+          PY
