@@ -470,7 +470,7 @@ async def genuine_agent_opportunity_rss(capability: Optional[str]=None, currency
             "Real identity-signed buyer request (not a funded order). "
             +need["details"]+" | Maximum stated budget: "+str(need["max_budget"])
             +" "+need["currency"]+" | Expires: "+need["expires_at"]
-            +". Funding, settlement, fulfillment and escrow NOT verified.")
+            +". No escrow. Funding, settlement and fulfillment NOT verified.")
         try:
             created=datetime.fromisoformat(need["created_at"]).astimezone(timezone.utc)
             ET.SubElement(item,"pubDate").text=format_datetime(created,usegmt=True)
