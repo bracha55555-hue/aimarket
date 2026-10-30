@@ -74,6 +74,8 @@ jobs:
         run: python -m unittest -v test_production_discovery_audit.py
       - name: Verify public agent setup, independent provider feedback and human introductions without repeat outreach
         run: python -m unittest -v test_real_acquisition_audit.py
+      - name: Verify truthful MCP tool safety annotations, zero-key read path and security policy
+        run: python -m unittest -v test_mcp_agent_trust.py
       - name: Verify signed MCP seller offer without WebSocket or server-side keys
         run: |
           python - <<'PY'
