@@ -66,6 +66,8 @@ jobs:
           python -m unittest -v test_seller_browser_ack.py
       - name: Verify zero-browser, opt-in, private-identity signed offline provider client against server
         run: python -m unittest -v test_headless_provider_client.py
+      - name: Verify headless real buyer signature challenge, published request and private key isolation
+        run: python -m unittest -v test_headless_buyer_client.py
       - name: Verify free no-key one-command agent setup and voluntary nontracking sharing
         run: |
           node --check client/connect-guide.js
