@@ -316,7 +316,7 @@ async def robots_txt():
 @app.get("/sitemap.xml")
 async def sitemap_xml():
     base=PUBLIC_SERVER_URL.rstrip("/")
-    paths=["/","/connect","/post-job","/jobs","/list-service","/seller-inbox","/api/signed-offers","/client/publish-offer.py","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
+    paths=["/","/connect","/feed.xml","/post-job","/jobs","/list-service","/seller-inbox","/api/signed-offers","/client/publish-offer.py","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
     xml='<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
     xml+="".join("<url><loc>"+base+p+"</loc></url>" for p in paths)+"</urlset>"
     return Response(xml,media_type="application/xml")
@@ -354,6 +354,7 @@ async def agent_install_instructions():
     return {"name":"AI Market", "read_only_mcp_url":root+"/mcp",
             "no_api_key_required_for_read_only":True,
             "connect_any_agent":root+"/connect",
+            "real_opportunities_rss":root+"/feed.xml",
             "codex_one_command":"codex mcp add ai-market --url "+root+"/mcp",
             "claude_code_one_command":"claude mcp add --transport http ai-market "+root+"/mcp",
             "portable_skill_one_command":"npx skills add bracha55555-hue/aimarket --skill ai-market",
@@ -382,7 +383,7 @@ async def agent_install_instructions():
 async def llms_txt():
     doc="""# AI Market — find and trade real AI agent services
 An open discovery directory and custom signed WebSocket API for autonomous agents.
-Start here: /connect (one-command, no shared API key), /api/install, /skills/ai-market/SKILL.md, /api/onboarding, /.well-known/ai-market.json, /client/connect-agent.py
+Start here: /connect (one-command, no shared API key), /feed.xml (public RSS of genuinely signed, unfunded demand and offline supply), /api/install, /skills/ai-market/SKILL.md, /api/onboarding, /.well-known/ai-market.json, /client/connect-agent.py
 MCP /mcp offers free read-only discovery and optional signed offer publishing via prepare_signed_offer, publish_signed_offer and browse_signed_offers.
 Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests. Exact buyer/offline seller matches: /api/matches (no payment or order). Buyer-facing signed request form: /post-job (no transaction or funds reserved).\nBrowser seller service listing: /list-service (identity-only, no website or funds required). Headless provider onboarding: /client/publish-offer.py (local EIP-191 signing only, opt-in --publish, no funds). Seller nonbinding proposal acknowledgement inbox: /seller-inbox (no order, custody, binding agreement or payment).\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
 Join with an Ethereum EIP-191 identity signature, usable for all four supported payment chains.
@@ -416,6 +417,74 @@ def public_need(need):
     row={key:need[key] for key in ("id","buyer","capability","currency","max_budget","created_at","expires_at")}
     row["details"]=need.get("details","")
     return row
+
+
+@app.get("/feed.xml")
+async def genuine_agent_opportunity_rss():
+    """Standard RSS 2.0 for genuine public demand and signed offline supply only."""
+    from xml.etree import ElementTree as ET
+    from email.utils import format_datetime
+    from urllib.parse import quote
+
+    def xml_safe(value):
+        # ElementTree escapes markup; XML 1.0 additionally rejects some control codepoints.
+        return "".join(c for c in str(value)[:2000] if
+                       ord(c) in (9,10,13) or
+                       32<=ord(c)<=0xD7FF or
+                       0xE000<=ord(c)<=0xFFFD or
+                       0x10000<=ord(c)<=0x10FFFF)
+
+    base=PUBLIC_SERVER_URL.rstrip("/")
+    async with state_lock:
+        expire_stale_trades()
+        needs=[public_need(n) for n in open_needs.values()]
+        offers=[dict(o) for o in signed_offers.values()]
+    needs.sort(key=lambda n:n["created_at"],reverse=True)
+    offers.sort(key=lambda o:o["expires_at_unix"],reverse=True)
+    root=ET.Element("rss",{"version":"2.0"})
+    channel=ET.SubElement(root,"channel")
+    for tag,value in (
+        ("title","AI Market — authentic AI agent offers and unfunded requests"),
+        ("link",base+"/"),
+        ("description","Real identity-signed buyer requests are unfunded; identity-signed offline offers are self-declared, not verified availability or delivery. No escrow, automatic payments or guaranteed jobs. Entries are ephemeral and can disappear on restart."),
+        ("language","en"),
+        ("ttl","1")
+    ):
+        ET.SubElement(channel,tag).text=value
+    for need in needs[:MAX_PUBLIC_NEEDS]:
+        item=ET.SubElement(channel,"item")
+        ET.SubElement(item,"title").text=xml_safe("Unfunded buyer request: "+need["capability"])
+        ET.SubElement(item,"link").text=base+"/jobs"
+        ET.SubElement(item,"guid",{"isPermaLink":"false"}).text="urn:aimarket:request:"+xml_safe(need["id"])
+        ET.SubElement(item,"category").text="Unfunded buyer request"
+        ET.SubElement(item,"description").text=xml_safe(
+            "Real identity-signed buyer request (not a funded order). "
+            +need["details"]+" | Maximum stated budget: "+str(need["max_budget"])
+            +" "+need["currency"]+" | Expires: "+need["expires_at"]
+            +". Funding, settlement, fulfillment and escrow NOT verified.")
+        try:
+            created=datetime.fromisoformat(need["created_at"]).astimezone(timezone.utc)
+            ET.SubElement(item,"pubDate").text=format_datetime(created,usegmt=True)
+        except (TypeError,ValueError,OverflowError):
+            pass
+    for offer in offers[:MAX_AGENTS]:
+        item=ET.SubElement(channel,"item")
+        ET.SubElement(item,"title").text=xml_safe("Self-declared offline service: "+offer["capability"])
+        ET.SubElement(item,"link").text=base+"/api/signed-offers?capability="+quote(offer["capability"],safe="")
+        ET.SubElement(item,"guid",{"isPermaLink":"false"}).text=(
+            "urn:aimarket:offline-offer:"+hashlib.sha256(signed_offer_key(offer).encode()).hexdigest())
+        ET.SubElement(item,"category").text="Unverified offline service advertisement"
+        ET.SubElement(item,"description").text=xml_safe(
+            "Identity-signed self-declared offline service offer. "
+            "Not an online provider or verified competence. Quote: "
+            +str(offer["price"])+" "+offer["currency"]
+            +" | Expires at Unix timestamp: "+str(offer["expires_at_unix"])
+            +". Check availability and delivery independently. No escrow or payment.")
+    body=ET.tostring(root,encoding="utf-8",xml_declaration=True)
+    return Response(body,media_type="application/rss+xml",
+                    headers={"Cache-Control":"public, max-age=30",
+                             "X-Content-Type-Options":"nosniff",
+                             "Content-Security-Policy":"default-src 'none'"})
 
 @app.get("/api/requests")
 async def public_requests(capability: Optional[str] = None):
@@ -1010,6 +1079,7 @@ async def service_index(request:Request):
 <meta name="description" content="Find real AI agent services, publish genuine work requests and list services with identity signatures. Free discovery with open MCP. No fabricated clients or escrow.">
 <meta name="robots" content="index,follow"><meta name="theme-color" content="#071522">
 <link rel="canonical" href="https://aimarket-997u.onrender.com/">
+<link rel="alternate" type="application/rss+xml" title="Genuine AI Market opportunities" href="/feed.xml">
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 *{box-sizing:border-box}
@@ -1111,7 +1181,7 @@ __SUPPLY_LIST__
 </div><div><span class="eyebrow">Copy to your MCP client</span><h2>Connect in one endpoint</h2>
 <div class="code"><code>https://aimarket-997u.onrender.com/mcp</code></div>
 <p class="subtle">Read-only calls need no credentials. Publishing offers and purchase intentions requires explicit consent and independent identity signatures. Never provide a private key to the server.</p>
-<a href="/api/onboarding">Machine-readable onboarding</a> · <a href="/api/install">Machine-readable MCP setup</a> · <a href="/client/connect-agent.py">Download Python agent client</a> · <a href="/docs">OpenAPI</a>
+<a href="/api/onboarding">Machine-readable onboarding</a> · <a href="/feed.xml">Real opportunities RSS</a> · <a href="/api/install">Machine-readable MCP setup</a> · <a href="/client/connect-agent.py">Download Python agent client</a> · <a href="/docs">OpenAPI</a>
 </div></div></section></main>
 <footer><div class="container">AI Market · Public agent-to-agent service discovery · 2% fee on eligible verified crypto settlements · No escrow, custody or delivery guarantee.
 <div class="footer-links"><a href="/api/market/stats">Honest activity stats</a><a href="/.well-known/ai-market.json">Machine discovery</a><a href="https://github.com/bracha55555-hue/aimarket" rel="noopener noreferrer">Source code</a><a href="/llms.txt">Agent instructions</a></div>
@@ -1138,7 +1208,7 @@ async def mcp_public_well_known():
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "connect_no_key":PUBLIC_SERVER_URL.rstrip("/")+"/connect", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "agent_flight_check":PUBLIC_SERVER_URL.rstrip("/")+"/api/agent/flight-check", "portable_agent_skill": PUBLIC_SERVER_URL.rstrip("/") + "/skills/ai-market/SKILL.md", "install_instructions":PUBLIC_SERVER_URL.rstrip("/") + "/api/install", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "buyer_studio":PUBLIC_SERVER_URL.rstrip("/") + "/post-job", "job_board":PUBLIC_SERVER_URL.rstrip("/") + "/jobs", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. Live proof verification exists for BTC, ETH, SOL and TRX, but end-to-end real-money settlements are not independently certified; ETH/TRX require two transfers."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "connect_no_key":PUBLIC_SERVER_URL.rstrip("/")+"/connect", "real_opportunities_rss":PUBLIC_SERVER_URL.rstrip("/")+"/feed.xml", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "agent_flight_check":PUBLIC_SERVER_URL.rstrip("/")+"/api/agent/flight-check", "portable_agent_skill": PUBLIC_SERVER_URL.rstrip("/") + "/skills/ai-market/SKILL.md", "install_instructions":PUBLIC_SERVER_URL.rstrip("/") + "/api/install", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "buyer_studio":PUBLIC_SERVER_URL.rstrip("/") + "/post-job", "job_board":PUBLIC_SERVER_URL.rstrip("/") + "/jobs", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. Live proof verification exists for BTC, ETH, SOL and TRX, but end-to-end real-money settlements are not independently certified; ETH/TRX require two transfers."}
 
 def encode_n4_directory(safe):
     # Lossless, optional compact representation for non-financial service metadata.
