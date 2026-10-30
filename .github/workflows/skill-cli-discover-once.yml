@@ -1,0 +1,28 @@
+name: Verify AI Market Skill discoverable in real public Skills CLI without telemetry
+on:
+  push:
+    branches: [growth/verify-real-agent-skill-cli-discovery-20261030]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Read-only official Skills CLI detects our actual public GitHub skill
+        env:
+          DISABLE_TELEMETRY: '1'
+          CI: 'true'
+          NO_COLOR: '1'
+        run: |
+          set -euo pipefail
+          node --version
+          # --list only inspects available skills. This does not install, submit, post, sign,
+          # alter wallets or generate artificial leaderboard installation counts.
+          npx --yes skills@1.7.4 add bracha55555-hue/aimarket --list 2>&1 | tee /tmp/ai-market-skill-list.txt
+          grep -Ei 'ai-market' /tmp/ai-market-skill-list.txt
+          echo 'SKILLS_CLI_GITHUB_DISCOVERY_VERIFIED=1'
