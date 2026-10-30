@@ -1,0 +1,59 @@
+name: One-time real MCPRepository free public index submission
+on:
+  push:
+    branches:
+      - marketing/mcprepository-one-off-20261030
+    paths:
+      - .github/workflows/mcprepository-submit-20261030.yml
+permissions:
+  contents: read
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Submit genuine public GitHub MCP repository exactly once, no secrets or payments
+        run: |
+          python3 - <<'PY'
+          import json
+          import urllib.request
+          import urllib.error
+          import sys
+          repo="https://github.com/bracha55555-hue/aimarket"
+          endpoint="https://mcprepository.com/api/index"
+          # Directly use the documented frontend form's POST /api/index JSON {"url":"https://github.com/..."}.
+          # This public one-off submission is operator-disclosed and does not impersonate agents.
+          data=json.dumps({"url":repo},separators=(",",":")).encode("utf-8")
+          req=urllib.request.Request(endpoint,data=data,method="POST",headers={
+              "Content-Type":"application/json","Accept":"application/json",
+              "User-Agent":"AI-Market-Operator-One-Off-Submission/1.0 (+https://github.com/bracha55555-hue/aimarket)"})
+          try:
+              with urllib.request.urlopen(req,timeout=35) as response:
+                  code=response.status
+                  payload=json.loads(response.read(12000))
+          except urllib.error.HTTPError as exc:
+              print("MCPREPOSITORY_API_HTTP",exc.code)
+              raise SystemExit(1)
+          except (OSError,TimeoutError,ValueError) as exc:
+              print("MCPREPOSITORY_API_ERROR",type(exc).__name__)
+              raise SystemExit(1)
+          if code!=200 or not isinstance(payload,dict):
+              print("MCPREPOSITORY_NOT_CONFIRMED_HTTP",code)
+              raise SystemExit(1)
+          if payload.get("valid") is False:
+              print("MCPREPOSITORY_REPO_REJECTED",True)
+              raise SystemExit(1)
+          if payload.get("duplicate") is True:
+              print("MCPREPOSITORY_ALREADY_INDEXED",True)
+              print("MCPREPOSITORY_NO_NEW_ENTRY_CREATED",True)
+              raise SystemExit(0)
+          if payload.get("status")=="queued":
+              link=payload.get("url")
+              print("MCPREPOSITORY_QUEUED",True)
+              if isinstance(link,str) and link.startswith("https://mcprepository.com/"):
+                  print("MCPREPOSITORY_EXPECTED_URL",link)
+              print("MCPREPOSITORY_PUBLIC_LISTING_NOT_YET_VERIFIED",True)
+          else:
+              print("MCPREPOSITORY_UNEXPECTED_RESPONSE_STATUS",str(payload.get("status"))[:65])
+              raise SystemExit(1)
+          PY
