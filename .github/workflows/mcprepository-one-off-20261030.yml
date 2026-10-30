@@ -41,6 +41,9 @@ jobs:
               print("PUBLIC_FORM_HTTP",r.status)
               print("PUBLIC_FORM_EFFECTIVE_URL",r.url)
           p=Forms();p.feed(body)
+          for term in ("submitBtn", "githubUrl", "fetch(", "XMLHttpRequest", "/api/", "POST"):
+              loc=body.find(term)
+              print("SUBMISSION_SCRIPT_CONTEXT",term,loc,repr(body[max(0,loc-800):loc+2200])[:3500] if loc>=0 else "")
           print("PUBLIC_FORM_COUNT",len(p.forms))
           print("PUBLIC_FORM_DETAILS",repr(p.forms)[:6500])
           print("PUBLIC_FORM_SCRIPT_PATHS",repr(p.scripts[:8])[:1600])
