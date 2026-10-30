@@ -420,8 +420,12 @@ def public_need(need):
 
 
 @app.get("/feed.xml")
-async def genuine_agent_opportunity_rss():
+async def genuine_agent_opportunity_rss(capability: Optional[str]=None, currency: Optional[str]=None):
     """Standard RSS 2.0 for genuine public demand and signed offline supply only."""
+    if capability is not None and not re.fullmatch(r"[A-Za-z0-9 ._-]{1,48}",capability):
+        return JSONResponse({"error":"invalid capability"},status_code=422)
+    if currency is not None and currency not in FEE_WALLETS:
+        return JSONResponse({"error":"unsupported currency"},status_code=422)
     from xml.etree import ElementTree as ET
     from email.utils import format_datetime
     from urllib.parse import quote
@@ -435,10 +439,15 @@ async def genuine_agent_opportunity_rss():
                        0x10000<=ord(c)<=0x10FFFF)
 
     base=PUBLIC_SERVER_URL.rstrip("/")
+    q=(capability or "").strip().casefold()
     async with state_lock:
         expire_stale_trades()
-        needs=[public_need(n) for n in open_needs.values()]
-        offers=[dict(o) for o in signed_offers.values()]
+        needs=[public_need(n) for n in open_needs.values()
+               if (not q or q in n["capability"].casefold()) and
+                  (not currency or currency==n["currency"])]
+        offers=[dict(o) for o in signed_offers.values()
+                if (not q or q in o["capability"].casefold()) and
+                   (not currency or currency==o["currency"])]
     needs.sort(key=lambda n:n["created_at"],reverse=True)
     offers.sort(key=lambda o:o["expires_at_unix"],reverse=True)
     root=ET.Element("rss",{"version":"2.0"})
