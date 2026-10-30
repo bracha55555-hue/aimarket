@@ -1,0 +1,92 @@
+name: One-off factual AI Market remote MCP discovery on mcp.tc
+on:
+  push:
+    branches:
+      - marketing/mcptc-one-off-remote-directory-20261030
+permissions:
+  contents: read
+jobs:
+  submit:
+    if: github.ref == 'refs/heads/marketing/mcptc-one-off-remote-directory-20261030'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Submit one real public remote MCP endpoint and verify only real status
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          import time
+          import urllib.request
+          import urllib.error
+          from urllib.parse import quote,urlsplit
+          directory="https://mcp.tc"
+          actual="https://aimarket-997u.onrender.com/mcp"
+          agent="AI-Market-Official-Operator-Submission/1.0"
+          def request(url,data=None):
+              if not isinstance(url,str) or not url.startswith(directory+"/"):
+                  raise ValueError("Only official MCP directory origin allowed")
+              req=urllib.request.Request(url,data=data,
+                  headers={"User-Agent":agent,"Accept":"application/json",
+                      **({"Content-Type":"application/json"} if data is not None else {})},
+                  method="POST" if data is not None else "GET")
+              try:
+                  with urllib.request.urlopen(req,timeout=25) as resp:
+                      raw=resp.read(100000)
+                      return resp.status,json.loads(raw)
+              except urllib.error.HTTPError as exc:
+                  # Do not echo arbitrary remote response body into public CI logs.
+                  print("MCPTC_HTTP_ERROR",exc.code)
+                  raise SystemExit(1)
+              except (OSError,TimeoutError,ValueError) as exc:
+                  print("MCPTC_REQUEST_ERROR",type(exc).__name__)
+                  raise SystemExit(1)
+          # Only exact remote URLs count as an existing public listing.
+          code,listed=request(directory+"/v0.1/servers?search=AI%20Market&limit=100")
+          if isinstance(listed,dict):
+              for item in listed.get("servers",[]):
+                  server=item.get("server",{}) if isinstance(item,dict) else {}
+                  if any(x.get("url")==actual for x in server.get("remotes",[]) if isinstance(x,dict)):
+                      print("MCPTC_ALREADY_DISCOVERABLE",True)
+                      print("MCPTC_DIRECTORY_SERVER_NAME",server.get("name","unknown"))
+                      raise SystemExit(0)
+          payload={"url":actual,"note":("AI Market is the actual public remote MCP server for discovery of independent "
+              "identity-signed offline agent offers and genuine unfunded buyer requests. "
+              "Free read-only access; opt-in EIP-191 writes; crypto settlement is not verified by identity alone. "
+              "No escrow, fake customers or guaranteed earnings.")}
+          code,answer=request(directory+"/submit",json.dumps(payload,separators=(",",":")).encode("utf-8"))
+          if code!=202 or not isinstance(answer,dict):
+              print("MCPTC_NOT_ACCEPTED",code)
+              raise SystemExit(1)
+          status_url=answer.get("status_url","")
+          parts=urlsplit(status_url)
+          if (parts.scheme!="https" or parts.netloc!="mcp.tc"
+              or not re.fullmatch(r"/s/[a-zA-Z0-9_-]{8,120}\\.json",parts.path)
+              or parts.query or parts.fragment):
+              print("MCPTC_ACCEPTED_BUT_STATUS_LINK_UNVERIFIED",True)
+              raise SystemExit(1)
+          print("MCPTC_SUBMISSION_ACCEPTED",True)
+          print("MCPTC_ALREADY_QUEUED",bool(answer.get("existing_submission")))
+          # Status pages are read-only; do not publish status tokens (not needed for customers).
+          for attempt in range(9):
+              time.sleep(8 if attempt else 1)
+              _,state=request(status_url)
+              value=state.get("state","unknown") if isinstance(state,dict) else "unknown"
+              if value not in {"queued","checking","reviewing","listed","duplicate","pending","rejected","error"}:
+                  print("MCPTC_UNKNOWN_STATE")
+                  break
+              if state.get("terminal"):
+                  print("MCPTC_TERMINAL_STATE",value)
+                  link=state.get("link","")
+                  if value in ("listed","duplicate") and isinstance(link,str) and re.fullmatch(
+                        r"https://mcp\\.tc/i/[A-Za-z0-9_-]+",link):
+                      print("MCPTC_PUBLIC_LISTING",link)
+                  else:
+                      print("MCPTC_PUBLIC_LISTING_NOT_CONFIRMED",True)
+                  break
+          else:
+              print("MCPTC_STILL_PROCESSING_NOT_LIVE_YET",True)
+          PY
