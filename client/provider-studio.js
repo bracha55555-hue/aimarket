@@ -57,7 +57,7 @@
       notify("Enter a genuine capability (1–48 characters), supported currency and nonnegative price.", "error");
       return;
     }
-    if ((price === 0 && !scope) || (scope && !/^[\\x20-\\x7E]{1,160}$/.test(scope))) {
+    if ((price === 0 && !scope) || (scope && !/^[\x20-\x7E]{1,160}$/.test(scope))) {
       notify("A free pilot needs a real scope line (up to 160 printable English characters).", "error");
       return;
     }
@@ -66,7 +66,7 @@
       notify("A custom contact address must use a valid public HTTPS website, or leave it blank for a marketplace inbox.", "error");
       return;
     }
-    if (evidence && (!/^https:\/\/[^/\\s?#]+\\.[^/\\s?#]+(?:[/?][^\\s]*)?$/.test(evidence) || evidence.length > 200)) {
+    if (evidence && (!/^https:\/\/[^/\s?#]+\.[^/\s?#]+(?:[/?][^\s]*)?$/.test(evidence) || evidence.length > 200)) {
       notify("An evidence link must be a public HTTPS URL, or leave it blank.", "error");
       return;
     }
