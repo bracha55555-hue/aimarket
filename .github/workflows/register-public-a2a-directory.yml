@@ -1,0 +1,84 @@
+name: Register genuine AI Market A2A discovery in public agent registry (one time)
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/register-public-a2a-directory.yml
+permissions:
+  contents: read
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Register exact live agent card once without account, fake tasks, or credentials
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json,os,time,urllib.request,urllib.error
+          origin="https://aimarket-997u.onrender.com"
+          card_url=origin+"/.well-known/agent-card.json"
+          registry="https://a2aregistry.org/api/agents"
+          headers={"User-Agent":"AI-Market-Operator-Directory/1.0 (+https://github.com/bracha55555-hue/aimarket)",
+                   "Accept":"application/json"}
+          def get(url,timeout=25):
+              req=urllib.request.Request(url,headers=headers)
+              with urllib.request.urlopen(req,timeout=timeout) as resp:
+                  raw=resp.read(12000000).decode("utf-8","replace")
+                  return resp.status,json.loads(raw) if raw.strip() else {}
+          for index in range(26):
+              try:
+                  _,health=get(origin+"/health")
+                  if health.get("deployed_git_sha")==os.environ["EXPECTED_SHA"]:
+                      _,card=get(card_url)
+                      interfaces=card.get("supportedInterfaces",[])
+                      assert isinstance(card.get("skills"),list) and card["skills"]
+                      assert isinstance(card.get("capabilities"),dict)
+                      assert any(isinstance(x,dict) and x.get("url")==origin+"/a2a" and
+                          x.get("protocolVersion")=="1.0" and x.get("protocolBinding")=="JSONRPC"
+                          for x in interfaces)
+                      assert card["capabilities"].get("streaming") is False
+                      print("A2A_DIRECTORY_LIVE_CARD_VERIFIED",health["deployed_git_sha"])
+                      break
+              except (urllib.error.URLError,ValueError,AssertionError,KeyError,TimeoutError) as exc:
+                  print("A2A_CARD_NOT_READY",type(exc).__name__)
+              if index==25: raise RuntimeError("No registration: production A2A card not verified")
+              time.sleep(9)
+          code,existing=get(registry,timeout=35)
+          if code!=200 or not isinstance(existing,dict) or not isinstance(existing.get("agents"),list):
+              raise RuntimeError("Cannot read current registry; no POST")
+          matches=[a for a in existing["agents"] if isinstance(a,dict)
+                   and (a.get("wellKnownURI")==card_url or
+                        a.get("url")==origin+"/a2a")]
+          if matches:
+              print("A2A_DIRECTORY_ALREADY_LISTED",[(a.get("id"),a.get("name")) for a in matches[:3]])
+              raise SystemExit(0)
+          payload=json.dumps({"wellKnownURI":card_url}).encode("utf-8")
+          req=urllib.request.Request(registry+"/register",data=payload,method="POST",
+              headers={**headers,"Content-Type":"application/json"})
+          try:
+              with urllib.request.urlopen(req,timeout=50) as resp:
+                  status=resp.status
+                  raw=resp.read(40000).decode("utf-8","replace")
+          except urllib.error.HTTPError as exc:
+              body=exc.read(4000).decode("utf-8","replace")
+              print("A2A_DIRECTORY_REJECTED",exc.code,body[:1300])
+              raise
+          print("A2A_DIRECTORY_REGISTRATION_HTTP",status)
+          print("A2A_DIRECTORY_REGISTRATION_RESPONSE",raw[:1200])
+          if status not in (200,201,202):
+              raise RuntimeError("Registration was not accepted")
+          # A 202 may mean pending review. Only the public registry record proves indexing.
+          try:
+              _,latest=get(registry,timeout=35)
+              publicly=[a for a in latest.get("agents",[]) if isinstance(a,dict)
+                        and a.get("wellKnownURI")==card_url]
+              if publicly:
+                  print("A2A_DIRECTORY_PUBLICLY_LISTED",[(a.get("id"),a.get("name")) for a in publicly[:3]])
+              else:
+                  print("A2A_DIRECTORY_SUBMITTED_NOT_YET_PUBLICLY_INDEXED")
+          except (urllib.error.URLError,ValueError,TimeoutError) as exc:
+              print("A2A_DIRECTORY_READBACK_UNVERIFIED",type(exc).__name__)
+          print("Directory registration is NOT independent agent adoption, a funded request or verified revenue")
+          PY
