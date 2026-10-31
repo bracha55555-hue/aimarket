@@ -84,6 +84,8 @@ jobs:
         run: python -m unittest -v test_production_discovery_audit.py
       - name: Verify public agent setup, independent provider feedback and human introductions without repeat outreach
         run: python -m unittest -v test_real_acquisition_audit.py
+      - name: Verify real strictly free buyer requests match zero-priced signed providers, never paid offers
+        run: python -m unittest -v test_free_buyer_matching.py
       - name: Verify genuine signed MCP buyer request creation, replay resistance and no funds
         run: python -m unittest -v test_signed_mcp_buyer.py
       - name: Verify truthful MCP tool safety annotations, zero-key read path and security policy

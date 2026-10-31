@@ -75,7 +75,7 @@ class SignedMCPBuyerTest(unittest.TestCase):
         with patch.object(m.time,"time",return_value=time.time()+301):
             self.assertEqual(self.publish(p).status_code,422)
         self.assertEqual(self.client.get("/api/requests").json()["count"],0)
-        for mutation in ({"max_budget":0},{"max_budget":True},{"max_budget":float("nan")},
+        for mutation in ({"max_budget":-1},{"max_budget":True},{"max_budget":float("nan")},
                          {"currency":"USD"},{"details":""},{"capability":"<script>"}):
             payload={**self.terms,**mutation}
             # Test JSON parsing with finite, well-defined payloads separately.

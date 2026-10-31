@@ -60,7 +60,7 @@ class GenuineServiceDiscoveryTest(unittest.TestCase):
                 self.assertEqual(flight["live_supply"]["online_verified_agents_by_capability"],
                                  {"translation":0,"code-review":0})
                 self.assertFalse(flight["live_supply"]["offline_available_now"])
-                for budget in ["-1","0","nan","Infinity","100001","invalid","9"*45]:
+                for budget in ["-1","0.000000001","nan","Infinity","100001","invalid","9"*45]:
                     self.assertEqual(c.get("/api/agent/now",params={"max_budget":budget}).status_code,422)
                 self.assertEqual(c.get("/api/agent/now",params={"currency":"USD"}).status_code,422)
                 self.assertEqual(c.get("/api/matches").json()["count"],0)

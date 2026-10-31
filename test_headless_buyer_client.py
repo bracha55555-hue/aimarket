@@ -71,7 +71,8 @@ class SignedRealBuyerClientTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 buyer.validate_auth_challenge(altered,account.address)
         for terms in [
-            ("translation","ETH","0","Actual work"),
+            ("translation","ETH","-1","Actual work"),
+            ("translation","ETH","0.000000001","Actual work"),
             ("translation","ETH","nan","Actual work"),
             ("translation","TEST","0.02","Actual work"),
             ("<script>","ETH","0.02","Actual work"),

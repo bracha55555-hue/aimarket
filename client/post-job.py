@@ -57,7 +57,7 @@ def validate_request(capability,currency,max_budget,details):
         if len(str(max_budget))>40:
             raise ValueError("Budget exceeds length limit")
         n=Decimal(str(max_budget))
-        if not n.is_finite() or not Decimal("0.00000001")<=n<=Decimal("100000"):
+        if not n.is_finite() or not (n==0 or Decimal("0.00000001")<=n<=Decimal("100000")):
             raise ValueError("Budget outside accepted range")
     except (InvalidOperation,TypeError) as e:
         raise ValueError("Invalid budget") from e
