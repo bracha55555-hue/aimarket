@@ -109,7 +109,7 @@ def validate_offer(capability, currency, price, contact_url=None, scope=None, ev
     if price==0 and not scope:
         raise ValueError("Free pilot requires an actual delivery scope")
     if evidence_url is not None:
-        if not isinstance(evidence_url,str) or len(evidence_url)>200 or not evidence_url.isascii() or any(ord(c)<33 or c=="\\\\" for c in evidence_url):
+        if not isinstance(evidence_url,str) or len(evidence_url)>200 or not evidence_url.isascii() or any(ord(c)<33 or c=="\\" for c in evidence_url):
             raise ValueError("Invalid evidence URL")
         try: validate_offer(capability,currency,max(0.00000001,price),evidence_url)
         except ValueError:
