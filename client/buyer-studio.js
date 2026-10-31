@@ -43,9 +43,9 @@
     const budget = Number($("budget").value);
     if (action === "publish" && (
       !capability || capability.length > 64 || details.length < 12 || details.length > 500 ||
-      !Number.isFinite(budget) || budget < 0.00000001 || budget > 100000
+      !Number.isFinite(budget) || (budget !== 0 && budget < 0.00000001) || budget > 100000
     )) {
-      notify("Supply a capability, real job description (12–500 characters) and positive budget.", "error");
+      notify("Supply a capability, real job description (12–500 characters) and nonnegative budget (0 for a strictly free task).", "error");
       return;
     }
     if (action === "cancel" && !(last && last.id)) return;
