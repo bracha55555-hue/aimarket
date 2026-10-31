@@ -92,7 +92,7 @@ class ActualA2ADiscoveryTest(unittest.TestCase):
         self.assertEqual(len(m.signed_offers),0)
 
     def test_official_read_only_audits_not_counted_as_independent_adoption(self):
-        with self.client:
+        if True:
             before=self.client.get("/api/market/stats").json()["events_since_start"]["a2a_discovery_calls"]
             body={"jsonrpc":"2.0","id":3,"method":"SendMessage",
                 "params":{"message":{"messageId":"m-1","role":"ROLE_USER","parts":[{"text":"status"}]}}}
