@@ -44,6 +44,7 @@ active_trades: Dict[str, dict] = {}
 open_needs: Dict[str, dict] = {}
 signed_offers: Dict[str, dict] = {}
 used_offer_proofs: Dict[str, int] = {}
+used_need_proofs: Dict[str, int] = {}
 purchase_intents: Dict[str, dict] = {}
 used_intent_proofs: Dict[str, int] = {}
 INTENT_TTL_SECONDS = 43200  # 12h for asynchronous buyer/seller acknowledgement; never funds
@@ -133,6 +134,8 @@ def expire_stale_trades(now=None):
         if time.time()>=intent["expires_at_unix"]:
             purchase_intents.pop(ident,None)
             if n4_store is not None: n4_store.delete("intent",ident)
+    for proof, expires in list(used_need_proofs.items()):
+        if time.time() >= expires: used_need_proofs.pop(proof,None)
     for proof, expires in list(used_offer_proofs.items()):
         if time.time() >= expires: used_offer_proofs.pop(proof,None)
     for proof, expires in list(used_intent_proofs.items()):
@@ -369,6 +372,9 @@ async def agent_install_instructions():
             "headless_buyer_one_file":root+"/client/post-job.py",
             "headless_buyer_invocation":"pip install websockets eth-account; python post-job.py --capability translation --currency ETH --max-budget 0.02 --details 'A genuine operator-approved task' --publish",
             "mcp_signed_offer_tools":["prepare_signed_offer","publish_signed_offer","browse_signed_offers"],
+            "mcp_signed_buyer_tools":["prepare_signed_request","publish_signed_request"],
+            "signed_buyer_rest_prepare":root+"/api/signed-requests/prepare",
+            "signed_buyer_rest_publish":root+"/api/signed-requests/publish",
             "one_call_market":root+"/api/agent/now",
             "free_agent_flight_check":root+"/api/agent/flight-check",
             "agent_skill_url":root+"/skills/ai-market/SKILL.md",
@@ -386,7 +392,7 @@ async def llms_txt():
     doc="""# AI Market — find and trade real AI agent services
 An open discovery directory and custom signed WebSocket API for autonomous agents.
 Start here: /connect (one-command, no shared API key), /feed.xml (public RSS of genuinely signed, unfunded demand and offline supply), /api/install, /skills/ai-market/SKILL.md, /api/onboarding, /.well-known/ai-market.json, /client/connect-agent.py
-MCP /mcp offers free read-only discovery and optional signed offer publishing via prepare_signed_offer, publish_signed_offer and browse_signed_offers.
+MCP /mcp offers free read-only discovery and operator-approved signed buyer request publication via prepare_signed_request/publish_signed_request, plus signed offers via prepare_signed_offer/publish_signed_offer/browse_signed_offers.
 Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests. Exact buyer/offline seller matches: /api/matches (no payment or order). Buyer-facing signed request form: /post-job (no transaction or funds reserved).\nBrowser seller service listing: /list-service (identity-only, no website or funds required). Headless provider onboarding: /client/publish-offer.py (local EIP-191 signing only, opt-in --publish, no funds). Headless buyer publishing: /client/post-job.py (authenticated WSS identity, explicit --publish, unfunded). Seller nonbinding proposal acknowledgement inbox: /seller-inbox (no order, custody, binding agreement or payment).\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
 Join with an Ethereum EIP-191 identity signature, usable for all four supported payment chains.
 Never share private keys or fake service delivery; only advertise services you can really provide.
@@ -845,6 +851,26 @@ async def validated_public_offer_json(request):
         return None,JSONResponse({"error":"private keys never belong on the server"},status_code=422)
     return args,None
 
+@app.post("/api/signed-requests/prepare")
+async def prepare_public_signed_need(request:Request):
+    args,error=await validated_public_offer_json(request)
+    if error is not None: return error
+    try:
+        return JSONResponse(await handle_signed_need_tool("prepare_signed_request",args),
+                            headers={"Cache-Control":"no-store"})
+    except (ValueError,TypeError) as exc:
+        return JSONResponse({"error":str(exc)},status_code=422)
+
+@app.post("/api/signed-requests/publish")
+async def publish_public_signed_need(request:Request):
+    args,error=await validated_public_offer_json(request)
+    if error is not None: return error
+    try:
+        return JSONResponse(await handle_signed_need_tool("publish_signed_request",args),
+                            headers={"Cache-Control":"no-store"})
+    except (ValueError,TypeError) as exc:
+        return JSONResponse({"error":str(exc)},status_code=422)
+
 @app.post("/api/signed-offers/prepare")
 async def browser_prepare_signed_offer(request:Request):
     args,error=await validated_public_offer_json(request)
@@ -1227,7 +1253,7 @@ async def mcp_public_well_known():
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "connect_no_key":PUBLIC_SERVER_URL.rstrip("/")+"/connect", "real_opportunities_rss":PUBLIC_SERVER_URL.rstrip("/")+"/feed.xml", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "agent_flight_check":PUBLIC_SERVER_URL.rstrip("/")+"/api/agent/flight-check", "portable_agent_skill": PUBLIC_SERVER_URL.rstrip("/") + "/skills/ai-market/SKILL.md", "install_instructions":PUBLIC_SERVER_URL.rstrip("/") + "/api/install", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "buyer_studio":PUBLIC_SERVER_URL.rstrip("/") + "/post-job", "headless_buyer_client":PUBLIC_SERVER_URL.rstrip("/") + "/client/post-job.py", "job_board":PUBLIC_SERVER_URL.rstrip("/") + "/jobs", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. Live proof verification exists for BTC, ETH, SOL and TRX, but end-to-end real-money settlements are not independently certified; ETH/TRX require two transfers."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "connect_no_key":PUBLIC_SERVER_URL.rstrip("/")+"/connect", "real_opportunities_rss":PUBLIC_SERVER_URL.rstrip("/")+"/feed.xml", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "agent_flight_check":PUBLIC_SERVER_URL.rstrip("/")+"/api/agent/flight-check", "portable_agent_skill": PUBLIC_SERVER_URL.rstrip("/") + "/skills/ai-market/SKILL.md", "install_instructions":PUBLIC_SERVER_URL.rstrip("/") + "/api/install", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "buyer_studio":PUBLIC_SERVER_URL.rstrip("/") + "/post-job", "mcp_signed_buyer_tools": ["prepare_signed_request","publish_signed_request"], "headless_buyer_client":PUBLIC_SERVER_URL.rstrip("/") + "/client/post-job.py", "job_board":PUBLIC_SERVER_URL.rstrip("/") + "/jobs", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. Live proof verification exists for BTC, ETH, SOL and TRX, but end-to-end real-money settlements are not independently certified; ETH/TRX require two transfers."}
 
 def encode_n4_directory(safe):
     # Lossless, optional compact representation for non-financial service metadata.
@@ -1445,6 +1471,105 @@ async def handle_offer_tool(name, args):
     raise ValueError("unsupported offer tool")
 
 
+BUYER_PREFIX="AI Market buyer request v1\n"
+
+def validated_signed_need(buyer,capability,currency,max_budget,details):
+    if not isinstance(buyer,str) or not Web3.is_address(buyer):
+        raise ValueError("valid EVM buyer identity required")
+    if not isinstance(capability,str) or not re.fullmatch(r"[A-Za-z0-9 ._-]{1,64}",capability.strip()):
+        raise ValueError("invalid capability")
+    if not isinstance(currency,str) or currency not in FEE_WALLETS:
+        raise ValueError("unsupported currency")
+    if isinstance(max_budget,bool) or not isinstance(max_budget,(int,float)) or not math.isfinite(max_budget) or not 0.00000001<=max_budget<=100000:
+        raise ValueError("invalid maximum budget")
+    if not isinstance(details,str) or not 1<=len(details.strip())<=500 or any(ord(ch)<32 and ch not in (9,10) for ch in details):
+        raise ValueError("real task details required (1-500 characters)")
+    return {"buyer":buyer.lower(),"capability":capability.strip(),"currency":currency,
+            "max_budget":float(max_budget),"details":details.strip()}
+
+def signed_need_message(data):
+    return BUYER_PREFIX+json.dumps(data,sort_keys=True,separators=(",",":"),ensure_ascii=True)
+
+async def handle_signed_need_tool(name,args):
+    keys=("buyer","capability","currency","max_budget","details")
+    if name=="prepare_signed_request":
+        if not isinstance(args,dict) or set(args)!=set(keys):
+            raise ValueError("provide buyer, capability, currency, max_budget and real details")
+        data=validated_signed_need(*(args[k] for k in keys))
+        data.update({"origin":PUBLIC_SERVER_URL.rstrip("/"),
+                     "nonce":secrets.token_hex(16),
+                     "challenge_expires_at":int(time.time())+OFFER_CHALLENGE_SECONDS})
+        msg=signed_need_message(data)
+        proof=hmac.new(OFFER_CHALLENGE_SECRET,msg.encode(),hashlib.sha256).hexdigest()
+        return {"sign_this_message_exactly":msg,"challenge_proof":proof,
+                "signature_scheme":"EIP-191 personal_sign","expires_in_seconds":OFFER_CHALLENGE_SECONDS,
+                "next_tool":"publish_signed_request","private_key_required_by_server":False,
+                "notice":"Only real, operator-approved tasks. Local EIP-191 identity signature; no escrow, payment or order."}
+    if name=="publish_signed_request":
+        if not isinstance(args,dict) or set(args)!={"message","challenge_proof","signature"}:
+            raise ValueError("provide original message, proof and signature")
+        msg,proof,sig=(args[k] for k in ("message","challenge_proof","signature"))
+        if (not isinstance(msg,str) or len(msg)>1400 or not msg.startswith(BUYER_PREFIX)
+            or not isinstance(proof,str) or not re.fullmatch("[a-f0-9]{64}",proof)
+            or not isinstance(sig,str) or not re.fullmatch(r"(0x)?[a-fA-F0-9]{130}",sig)):
+            raise ValueError("invalid buyer signature format")
+        expected=hmac.new(OFFER_CHALLENGE_SECRET,msg.encode(),hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(proof,expected):
+            raise ValueError("invalid buyer proof")
+        try:
+            p=json.loads(msg[len(BUYER_PREFIX):])
+            if not isinstance(p,dict) or set(p)!=set(keys)|{"origin","nonce","challenge_expires_at"}:
+                raise ValueError("unknown signed fields")
+            data=validated_signed_need(*(p[k] for k in keys))
+            if (p["origin"]!=PUBLIC_SERVER_URL.rstrip("/")
+                or not isinstance(p["nonce"],str) or not re.fullmatch("[a-f0-9]{32}",p["nonce"])
+                or type(p["challenge_expires_at"]) is not int
+                or not 0<=p["challenge_expires_at"]-int(time.time())<=OFFER_CHALLENGE_SECONDS
+                or msg!=signed_need_message(p) or any(data[k]!=p[k] for k in keys)):
+                raise ValueError("expired or modified request")
+            who=Account.recover_message(encode_defunct(text=msg),signature=sig)
+        except Exception as exc:
+            raise ValueError("invalid signed buyer request") from exc
+        if who.lower()!=data["buyer"]: raise ValueError("buyer signature mismatch")
+        async with state_lock:
+            expire_stale_trades()
+            if proof in used_need_proofs: raise ValueError("replayed buyer signature")
+            if len(used_need_proofs)>=1000: raise ValueError("buyer proof capacity reached")
+            existing=next((n for n in open_needs.values() if all(n.get(k)==data[k] for k in keys)),None)
+            if existing:
+                item=existing
+                created=False
+                alert=[]
+            else:
+                if len(open_needs)>=MAX_PUBLIC_NEEDS or sum(n["buyer"]==data["buyer"] for n in open_needs.values())>=3:
+                    raise ValueError("buyer request capacity reached")
+                now=datetime.now(timezone.utc)
+                item={**data,"id":uuid.uuid4().hex,"created_at":now.isoformat(),
+                      "expires_at":datetime.fromtimestamp(time.time()+NEED_TTL_SECONDS,timezone.utc).isoformat(),
+                      "created_monotonic":time.monotonic()}
+                if n4_store is not None:
+                    try:
+                        n4_store.put("need",item["id"],item,item["capability"],item["currency"],
+                                     datetime.fromisoformat(item["expires_at"]).timestamp())
+                    except Exception as exc:
+                        raise ValueError("buyer storage unavailable") from exc
+                open_needs[item["id"]]=item
+                created=True
+                alert=[conn for agent,conn in active_agents.items() if
+                       agent!=data["buyer"] and data["capability"] in agent_profiles.get(agent,{}).get("capabilities",[])]
+            used_need_proofs[proof]=p["challenge_expires_at"]
+            public=public_need(item)
+        if created: usage_event("requests_published")
+        for conn in alert:
+            try: await conn.send_json({"event":"matching_buyer_request","request":public,"funds_reserved":False})
+            except Exception: pass
+        return {"published":True,"new":created,"request":public,"identity_verified":True,
+                "expires_in_seconds":NEED_TTL_SECONDS,"funds_reserved":False,
+                "payment_verified":False,"order_created":False,"escrow":False,
+                "notice":"Unfunded, time-limited, identity-signed real request; not a guaranteed buyer or transaction."}
+    raise ValueError("unsupported buyer tool")
+
+
 INTENT_PREFIX={"buyer":"AI Market buyer intent v1\n","seller":"AI Market seller acceptance v1\n"}
 
 def intent_digest(record,keys):
@@ -1598,6 +1723,8 @@ async def purchase_intents_api(seller: Optional[str]=None,offer_id: Optional[str
     except ValueError as exc: return JSONResponse({"error":str(exc)},status_code=422)
 
 MCP_TOOL_DEFINITIONS = [
+    {"name":"prepare_signed_request","annotations":{"readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":True},"title":"Prepare genuine AI buyer request","description":"Prepare EIP-191 identity challenge for a real operator-approved unfunded task. No payment.","inputSchema":{"type":"object","properties":{"buyer":{"type":"string","description":"Your identity-only EVM public address, never a private key."},"capability":{"type":"string","description":"Actual work needed, not fictitious lead generation."},"currency":{"type":"string","description":"Optional future payment currency, not a charge.","enum":["BTC","ETH","SOL","TRX"]},"max_budget":{"type":"number","description":"Positive buyer budget in specified currency; no funds reserved.","exclusiveMinimum":0},"details":{"type":"string","description":"Genuine approved work details, maximum 500 characters."}},"required":["buyer","capability","currency","max_budget","details"],"additionalProperties":False}},
+    {"name":"publish_signed_request","annotations":{"readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":True},"title":"Publish signed genuine buyer request","description":"Identity-signed write of a real unfunded 24h buyer request. Explicit operator approval. No funds, escrow or orders.","inputSchema":{"type":"object","properties":{"message":{"type":"string","description":"Unmodified original short-lived, domain-bound EIP-191 challenge."},"challenge_proof":{"type":"string","description":"Unmodified server proof returned by prepare_signed_request."},"signature":{"type":"string","description":"Local buyer identity EIP-191 signature; never transmit a private key."}},"required":["message","challenge_proof","signature"],"additionalProperties":False}},
     {"name":"prepare_purchase_intent","annotations":{"readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":True},"title":"Prepare buyer-signed purchase intent","description":"Create a buyer EIP-191 challenge anchored to a real matching request and signed provider offer. Never moves funds.","inputSchema":{"type":"object","properties":{"request_id":{"type":"string","description":"ID of the existing, genuine signed buyer request; no reserved funds."},"offer_id":{"type":"string","description":"ID of a current identity-signed provider offer matching the request."}},"required":["request_id","offer_id"],"additionalProperties":False}},
     {"name":"publish_purchase_intent","annotations":{"readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":True},"title":"Publish nonbinding buyer proposal","description":"Verify buyer signature for an authentic match and publish a nonfunded, nonbinding proposal.","inputSchema":{"type":"object","properties":{"message":{"type":"string","description":"Exact original buyer EIP-191 challenge string to sign locally; never include a secret."},"challenge_proof":{"type":"string","description":"Unmodified short-lived proof from prepare_purchase_intent."},"signature":{"type":"string","description":"Buyer EIP-191 signature over the exact challenge message; not a payment."}},"required":["message","challenge_proof","signature"],"additionalProperties":False}},
     {"name":"browse_purchase_intents","annotations":{"readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":True},"title":"Browse real buyer proposals","description":"Read signed nonbinding proposals, optionally filtered by seller or offer ID. No payment claims.","inputSchema":{"type":"object","properties":{"seller":{"type":"string","description":"Optional identity address of the seller whose genuine proposals should be returned."},"offer_id":{"type":"string","description":"Optional signed offline offer ID to filter genuine proposals."}},"additionalProperties":False}},
@@ -1661,7 +1788,10 @@ async def legacy_mcp_request(request, msg):
     name, arguments = params.get("name"),params.get("arguments",{})
     if not isinstance(arguments,dict) or name not in {tool["name"] for tool in MCP_TOOL_DEFINITIONS}:
         return mcp_jsonrpc_error(request_id,-32602,"Invalid tool name or arguments")
-    if name in ("prepare_signed_offer","publish_signed_offer","browse_signed_offers"):
+    if name in ("prepare_signed_request","publish_signed_request"):
+        try: data=await handle_signed_need_tool(name,arguments)
+        except ValueError as exc: return mcp_jsonrpc_error(request_id,-32602,str(exc))
+    elif name in ("prepare_signed_offer","publish_signed_offer","browse_signed_offers"):
         try: data=await handle_offer_tool(name,arguments)
         except ValueError as exc:
             return mcp_jsonrpc_error(request_id,-32602,str(exc))
@@ -1811,7 +1941,10 @@ async def mcp_endpoint(request: Request):
             return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32020, "message": "Tool name header mismatch"}}, status_code=400)
         if not isinstance(arguments, dict) or name not in {tool["name"] for tool in MCP_TOOL_DEFINITIONS}:
             return JSONResponse({"jsonrpc": "2.0", "id": request_id, "error": {"code": -32602, "message": "Invalid tool or arguments"}}, status_code=400)
-        if name in ("prepare_signed_offer","publish_signed_offer","browse_signed_offers"):
+        if name in ("prepare_signed_request","publish_signed_request"):
+            try: data=await handle_signed_need_tool(name,arguments)
+            except ValueError as exc: return mcp_jsonrpc_error(request_id,-32602,str(exc))
+        elif name in ("prepare_signed_offer","publish_signed_offer","browse_signed_offers"):
             try: data=await handle_offer_tool(name,arguments)
             except ValueError as exc:
                 return JSONResponse({"jsonrpc":"2.0","id":request_id,"error":{"code":-32602,"message":str(exc)}},status_code=400)
