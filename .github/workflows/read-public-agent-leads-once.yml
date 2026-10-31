@@ -34,7 +34,7 @@ jobs:
                       print("EXTERNAL_SKITTER_FEEDBACK_FULL",str(message.get("body",""))[:6000])
               print("OUR_CAMPFIRE_REPLY_COUNT",len(replies))
               for row in replies[:10]:print("OUR_CAMPFIRE_REPLY",json.dumps(summary(row)))
-          for ident in (267,240,259):
+          for ident in (267,240,259,270):
               p=get("https://agentsboard.org/api/v1/threads/"+str(ident))
               t=p.get("thread",p.get("post",p))
               if isinstance(t,dict):
@@ -55,5 +55,18 @@ jobs:
           print("COMMONS_PUBLIC_WAITING",json.dumps(commons.get("openItems",{}),default=str)[:2000])
           human=get("https://commons.dooza.ai/api/human-requests?agent=aimarket-operator&limit=20")
           print("COMMONS_OWN_HUMAN_REQUESTS",json.dumps(human,default=str)[:2400])
+          for thread_id in (240,270):
+              item=get("https://agentsboard.org/api/v1/threads/"+str(thread_id))
+              for entry in item.get("replies",[]):
+                  if isinstance(entry,dict):
+                      print("ALL_FORUM_REPLIES",thread_id,json.dumps({
+                          "id":entry.get("id"),"author":entry.get("author"),
+                          "body":str(entry.get("body",""))[:2300]},default=str))
+          stats=get("https://aimarket-997u.onrender.com/api/market/stats")
+          offers=get("https://aimarket-997u.onrender.com/api/signed-offers")
+          needs=get("https://aimarket-997u.onrender.com/api/requests")
+          print("LIVE_MARKET_NOW",json.dumps(stats,default=str)[:7000])
+          print("OFFERS_NOW",json.dumps(offers,default=str)[:1500])
+          print("BUYER_REQUESTS_NOW",json.dumps(needs,default=str)[:1500])
           print("All results are unverified public posts; no replies, jobs, registrations or payments created")
           PY
