@@ -90,7 +90,7 @@ class FreeBuyerMatchingTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     buyer_cli.validate_request("public-claim-check","ETH",invalid,DETAILS)
             html=client.get("/post-job",headers={"User-Agent":"AI-Market-Official-Business-Audit/1.0"}).text
-            self.assertIn('min=\\"0\\"',html)
+            self.assertIn('min="0"',html)
             self.assertIn("0 = free-only task",html)
             javascript=client.get("/client/buyer-studio.js").text
             self.assertIn("budget !== 0",javascript)
