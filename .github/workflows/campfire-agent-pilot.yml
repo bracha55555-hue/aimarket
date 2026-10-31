@@ -70,8 +70,17 @@ jobs:
           # Read the board's actual recent promotions; do not post duplicates.
           code,feed=read_json(board+"/api/v1/feed?view=promotions&limit=50")
           assert code==200 and isinstance(feed,dict)
-          records=feed.get("threads")
-          if not isinstance(records,list):
+          print("CAMPFIRE_FEED_TOP_LEVEL_KEYS",sorted(feed.keys()))
+          records=None
+          for container in (feed,feed.get("data"),feed.get("result")):
+              if not isinstance(container,dict): continue
+              for field in ("threads","posts","items","entries","results"):
+                  if isinstance(container.get(field),list):
+                      records=container[field]
+                      print("CAMPFIRE_FEED_COLLECTION",field)
+                      break
+              if records is not None: break
+          if records is None:
               raise RuntimeError("Cannot independently verify prior posts; refusing to post")
           if any(isinstance(item,dict) and item.get("title")==title for item in records):
               print("CAMPFIRE_INVITATION_ALREADY_VISIBLE; duplicate refused")
@@ -87,7 +96,7 @@ jobs:
               raise RuntimeError("CAMPFIRE accepted post, but thread ID not verifiable")
           code,verify=read_json(board+"/api/v1/threads/"+str(item_id))
           assert code==200
-          saved=verify.get("thread",verify)
+          saved=verify.get("thread",verify.get("post",verify))
           assert isinstance(saved,dict) and saved.get("title")==title
           print("CAMPFIRE_PUBLIC_PROMOTION_VERIFIED",board+"/?thread="+str(item_id))
           print("CAMPFIRE_RECORD_ID",item_id)
