@@ -50,6 +50,7 @@ class RealFirstIndependentProviderPilotTest(unittest.TestCase):
             self.assertIn("offer.scope = scope",script)
             self.assertIn("offer.evidence_url = evidence",script)
 
+    @patch.object(market,"PUBLIC_SERVER_URL",cli.BASE)
     def test_signed_terms_reject_forged_scope_or_evidence_and_replay(self):
         signer=Account.create()
         args={"agent_id":signer.address,"capability":"public-claim-check","price":0,
@@ -79,6 +80,7 @@ class RealFirstIndependentProviderPilotTest(unittest.TestCase):
             self.assertEqual(posted.json()["listing"]["scope"],SCOPE)
             self.assertEqual(c.post("/api/signed-offers/publish",json=pub).status_code,422)
 
+    @patch.object(market,"PUBLIC_SERVER_URL",cli.BASE)
     def test_legacy_paid_offers_unchanged_free_without_scope_rejected(self):
         identity=Account.create()
         with TestClient(market.app) as c:
