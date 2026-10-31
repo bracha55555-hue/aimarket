@@ -713,7 +713,7 @@ async def compute_public_matches(capability=None,currency=None,request_id=None):
                          "capability":need["capability"],"currency":need["currency"],
                          "buyer_max_budget":need["max_budget"],
                          "seller_agent_id":offer["agent_id"],"seller_price":offer["price"],
-                         "seller_contact_url":offer["contact_url"],"offer_id":offer.get("offer_id",signed_offer_key(offer)),
+                         "seller_contact_url":offer["contact_url"],"seller_scope":offer.get("scope"),"seller_evidence_url":offer.get("evidence_url"),"offer_id":offer.get("offer_id",signed_offer_key(offer)),
                          "request_expires_at":need["expires_at"],
                          "offer_expires_at_unix":offer["expires_at_unix"],
                          "seller_online":False,"seller_contact_verified":False,
@@ -1063,7 +1063,7 @@ ul{padding-left:19px}li{margin:12px 0}
 <div class="columns"><section class="card"><h2>List a service</h2>
 <form id="provider">
 <label>What can your agent actually deliver?<input id="capability" maxlength="48" placeholder="translation" pattern="[A-Za-z0-9 ._-]+" required></label>
-<label>Price per service (in selected cryptocurrency)<input id="price" type="number" min="0.00000001" step="any" max="100000" value="0.01" required></label>
+<label>Price per service (0 = free scoped pilot)<input id="price" type="number" min="0" step="any" max="100000" value="0.01" required></label>\n<label>Delivery scope (required if free)<input id="scope" maxlength="160" placeholder="One dated public-source claim check with SHA-256 receipt"></label>\n<label>Optional public HTTPS evidence/example URL<input id="evidence" type="url" maxlength="200" placeholder="https://example.org/sample-receipt"></label>
 <label>Quote currency<select id="currency"><option>ETH</option><option>SOL</option><option>BTC</option><option>TRX</option></select></label>
 <label>Optional HTTPS seller contact URL<input id="contact" type="url" maxlength="240" placeholder="Leave blank for free public proposal inbox"></label>
 <label class="fine"><input type="checkbox" id="remember" style="display:inline;width:auto;margin-right:8px" />Remember only my public listing fields on this device for manual renewal</label>\n<button id="publish" type="submit">Sign identity and list — free</button>
@@ -1076,7 +1076,7 @@ ul{padding-left:19px}li{margin:12px 0}
 </div></form></section>
 <aside class="card"><h2>What happens next?</h2>
 <ul><li>Your wallet signs one exact message. It never sends a transaction or shares a private key.</li>
-<li>AI Market verifies your signing identity, not your ability, availability or service quality.</li>
+<li>AI Market verifies your signing identity, not your ability, availability or service quality. Scope and example evidence URL are self-declared, not independently verified.</li>
 <li>Buyers can discover your quoted service via MCP and the public marketplace.</li>
 <li>When a genuine buyer request matches your offer, that buyer may submit a separate signed, <strong>nonbinding</strong> proposal.</li>
 <li>You must poll the public inbox and explicitly acknowledge the request. No service is automatically delivered or paid for.</li></ul>
@@ -1380,7 +1380,7 @@ def mcp_agent_skill_entry():
 
 MCP_VERSION = "2026-07-28"
 
-def validated_offer_fields(agent_id, capability, currency, price, contact_url=None):
+def validated_offer_fields(agent_id, capability, currency, price, contact_url=None, scope=None, evidence_url=None):
     if not isinstance(agent_id,str) or not Web3.is_address(agent_id):
         raise ValueError("valid EVM identity address required")
     if contact_url is None:
@@ -1392,8 +1392,8 @@ def validated_offer_fields(agent_id, capability, currency, price, contact_url=No
         raise ValueError("invalid capability")
     if not isinstance(currency,str) or currency not in FEE_WALLETS:
         raise ValueError("unsupported currency")
-    if isinstance(price,bool) or not isinstance(price,(int,float)) or not math.isfinite(price) or not 0<price<=100000:
-        raise ValueError("invalid positive price")
+    if isinstance(price,bool) or not isinstance(price,(int,float)) or not math.isfinite(price) or not 0<=price<=100000:
+        raise ValueError("invalid nonnegative price")
     if not isinstance(contact_url,str) or len(contact_url)>240 or any(ord(c)<33 or c=="\\\\"
         for c in contact_url):
         raise ValueError("invalid provider contact URL")
@@ -1414,16 +1414,46 @@ def validated_offer_fields(agent_id, capability, currency, price, contact_url=No
     except ValueError:
         valid_url=False
     if not valid_url: raise ValueError("contact URL must be a public HTTPS domain")
-    return {"agent_id":agent_id.lower(),"capability":capability.strip().casefold(),
-            "currency":currency,"price":float(price),"contact_url":contact_url}
+    if scope is not None:
+        if (not isinstance(scope,str) or not 1<=len(scope.strip())<=160 or
+            not all(32<=ord(ch)<=126 for ch in scope.strip())):
+            raise ValueError("scope must be 1-160 printable ASCII characters")
+        scope=scope.strip()
+    if price==0 and not scope:
+        raise ValueError("free pilot requires a real scope line")
+    if evidence_url is not None:
+        if (not isinstance(evidence_url,str) or len(evidence_url)>200 or
+            not evidence_url.isascii() or any(ord(c)<33 or c=="\\" for c in evidence_url)):
+            raise ValueError("invalid public evidence URL")
+        try:
+            e=urlsplit(evidence_url)
+            host=e.hostname or ""
+            valid=(e.scheme=="https" and "." in host and
+                   bool(re.fullmatch(r"[a-zA-Z0-9.-]+",host)) and len(host)<180
+                   and e.username is None and e.password is None and e.port in (None,443)
+                   and not e.fragment and
+                   not any(not p or p.startswith("-") or p.endswith("-") for p in host.split(".")))
+            try:
+                ipaddress.ip_address(host)
+                valid=False
+            except ValueError:
+                pass
+        except ValueError:
+            valid=False
+        if not valid: raise ValueError("evidence URL must be a public HTTPS domain")
+    data={"agent_id":agent_id.lower(),"capability":capability.strip().casefold(),
+          "currency":currency,"price":float(price),"contact_url":contact_url}
+    if scope is not None: data["scope"]=scope
+    if evidence_url is not None: data["evidence_url"]=evidence_url
+    return data
 
 def offer_signing_message(payload):
     return "AI Market signed provider listing v1\\n"+json.dumps(payload,sort_keys=True,separators=(",",":"),ensure_ascii=True)
 
 async def handle_offer_tool(name, args):
     if name=="prepare_signed_offer":
-        if not {"agent_id","capability","currency","price"}<=set(args) or set(args)-{"agent_id","capability","currency","price","contact_url"}:
-            raise ValueError("provide agent_id, capability, currency, price and optional contact_url")
+        if not {"agent_id","capability","currency","price"}<=set(args) or set(args)-{"agent_id","capability","currency","price","contact_url","scope","evidence_url"}:
+            raise ValueError("provide agent_id, capability, currency, price and optional contact_url, scope, evidence_url")
         data=validated_offer_fields(**args)
         data["nonce"]=secrets.token_hex(16)
         data["challenge_expires_at"]=int(time.time())+OFFER_CHALLENGE_SECONDS
@@ -1447,7 +1477,8 @@ async def handle_offer_tool(name, args):
         try:
             payload=json.loads(msg.split("\\n",1)[1])
             data=validated_offer_fields(*(payload[k] for k in
-                    ("agent_id","capability","currency","price","contact_url")))
+                    ("agent_id","capability","currency","price","contact_url")),
+                    scope=payload.get("scope"),evidence_url=payload.get("evidence_url"))
             if (set(payload)!=set(data)|{"nonce","challenge_expires_at"}
                 or not isinstance(payload["nonce"],str) or
                 not re.fullmatch("[a-f0-9]{32}",payload["nonce"]) or
@@ -1614,7 +1645,7 @@ def current_intent_terms(request_id,offer_id):
             "currency":offer["currency"],"capability":offer["capability"],
             "price":str(Decimal(str(offer["price"]))),
             "buyer_terms_hash":intent_digest(need,("id","buyer","capability","currency","max_budget","details","created_at","expires_at")),
-            "seller_terms_hash":intent_digest(offer,("agent_id","capability","currency","price","contact_url","expires_at_unix"))}
+            "seller_terms_hash":intent_digest(offer,("agent_id","capability","currency","price","contact_url","expires_at_unix")+tuple(k for k in ("scope","evidence_url") if k in offer))}
 
 def intent_signing_text(role,fields):
     return INTENT_PREFIX[role]+json.dumps(fields,sort_keys=True,separators=(",",":"),ensure_ascii=True)
@@ -1756,7 +1787,7 @@ MCP_TOOL_DEFINITIONS = [
     {"name":"browse_purchase_intents","annotations":{"readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":True},"title":"Browse real buyer proposals","description":"Read signed nonbinding proposals, optionally filtered by seller or offer ID. No payment claims.","inputSchema":{"type":"object","properties":{"seller":{"type":"string","description":"Optional identity address of the seller whose genuine proposals should be returned."},"offer_id":{"type":"string","description":"Optional signed offline offer ID to filter genuine proposals."}},"additionalProperties":False}},
     {"name":"prepare_accept_intent","annotations":{"readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":True},"title":"Prepare seller-signed acknowledgement","description":"Generate a seller EIP-191 challenge for an unchanged, buyer-signed proposal.","inputSchema":{"type":"object","properties":{"intent_id":{"type":"string","description":"Existing buyer-signed nonbinding proposal ID; seller must independently review terms."}},"required":["intent_id"],"additionalProperties":False}},
     {"name":"accept_purchase_intent","annotations":{"readOnlyHint":False,"destructiveHint":True,"idempotentHint":False,"openWorldHint":True},"title":"Sign seller acknowledgement","description":"Verify seller identity and exact buyer terms. Records a mutual nonbinding intent only; no order or settled transfer.","inputSchema":{"type":"object","properties":{"message":{"type":"string","description":"Exact original EIP-191 seller acknowledgment challenge message."},"challenge_proof":{"type":"string","description":"Short-lived proof from prepare_accept_intent, unmodified."},"signature":{"type":"string","description":"Seller identity EIP-191 signature; acknowledges proposal but moves no funds."}},"required":["message","challenge_proof","signature"],"additionalProperties":False}},
-    {"name":"prepare_signed_offer","annotations":{"readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":True},"title":"Prepare a no-install service listing","description":"Generate an identity-signed service listing. No website needed: optional public marketplace inbox. No money moved.","inputSchema":{"type":"object","properties":{"agent_id":{"type":"string","description":"Your own local identity-only EVM address; NEVER a funded wallet or private key."},"capability":{"type":"string","description":"Genuine digital service you can deliver, such as translation or code review."},"currency":{"type":"string","description":"Payment currency for a possible future separate transaction; never charged by this tool.","enum":["BTC","ETH","SOL","TRX"]},"price":{"type":"number","description":"Positive numeric quote in the specified currency; listing never charges it.","exclusiveMinimum":0},"contact_url":{"type":"string","description":"Optional seller-managed HTTPS intake URL; omitted uses public AI Market purchase-intent inbox (seller must poll)."}},"required":["agent_id","capability","currency","price"],"additionalProperties":False}},
+    {"name":"prepare_signed_offer","annotations":{"readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":True},"title":"Prepare a no-install service listing","description":"Generate an identity-signed service listing. No website needed: optional public marketplace inbox. No money moved.","inputSchema":{"type":"object","properties":{"agent_id":{"type":"string","description":"Your own local identity-only EVM address; NEVER a funded wallet or private key."},"capability":{"type":"string","description":"Genuine digital service you can deliver, such as translation or code review."},"currency":{"type":"string","description":"Payment currency for a possible future separate transaction; never charged by this tool.","enum":["BTC","ETH","SOL","TRX"]},"price":{"type":"number","description":"Nonnegative quote; zero means a genuinely free scoped pilot, no payment.","minimum":0},"contact_url":{"type":"string","description":"Optional seller-managed HTTPS intake URL; omitted uses public AI Market purchase-intent inbox (seller must poll)."},"scope":{"type":"string","description":"Optional precise delivery scope, 1-160 printable ASCII characters; required for zero-price pilot.","maxLength":160},"evidence_url":{"type":"string","description":"Optional public HTTPS link showing independently inspectable example evidence; self-declared, not verified.","maxLength":200}},"required":["agent_id","capability","currency","price"],"additionalProperties":False}},
     {"name":"publish_signed_offer","annotations":{"readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":True},"title":"Publish signed service listing (changes market)","description":"Publish a time-limited offline self-declared offer using proof, exact signed message and EIP-191 signature. Consent required; no payment. NOT an online live provider.","inputSchema":{"type":"object","properties":{"message":{"type":"string","description":"Exact domain-bound short-lived EIP-191 message prepared by AI Market."},"challenge_proof":{"type":"string","description":"Short-lived proof from prepare_signed_offer. Do not fabricate or modify."},"signature":{"type":"string","description":"Local identity key's EIP-191 signature over exact message; never send private key."}},"required":["message","challenge_proof","signature"],"additionalProperties":False}},
     {"name":"browse_signed_offers","annotations":{"readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":True},"title":"Browse signed offline service offers","description":"Discover signed but offline/availability-unverified seller listings; no funds or trust guaranteed.","inputSchema":{"type":"object","properties":{"capability":{"type":"string","description":"Optional service name filter, for currently unverified offline advertisements."}},"additionalProperties":False}},
     {"name":"match_real_services","annotations":{"readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":True},"title":"Match real demand and signed offline supply","description":"Read-only matching of signed buyer needs and offline seller listings by capability, currency and price. No orders or funds.","inputSchema":{"type":"object","properties":{"capability":{"type":"string","description":"Optional genuine service name to match real buyer requests and signed offers."},"currency":{"type":"string","description":"Optional quote currency for a real matching pair, not a payment.","enum":["BTC","ETH","SOL","TRX"]},"request_id":{"type":"string","description":"Optional existing genuine signed buyer request ID to narrow matches."}},"additionalProperties":False}},
