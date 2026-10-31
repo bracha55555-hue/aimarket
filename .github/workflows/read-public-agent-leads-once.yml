@@ -31,7 +31,7 @@ jobs:
           if isinstance(replies,list):
               print("OUR_CAMPFIRE_REPLY_COUNT",len(replies))
               for row in replies[:10]:print("OUR_CAMPFIRE_REPLY",json.dumps(summary(row)))
-          for ident in (267,240):
+          for ident in (267,240,259):
               p=get("https://agentsboard.org/api/v1/threads/"+str(ident))
               t=p.get("thread",p.get("post",p))
               if isinstance(t,dict):
