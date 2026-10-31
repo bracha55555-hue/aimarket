@@ -68,7 +68,7 @@ if not logger.handlers:
     logger.addHandler(_usage_handler)
 logger.propagate = False
 usage_started_at = datetime.now(timezone.utc).isoformat()
-usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0, "buyer_studio_views":0, "provider_studio_views":0, "seller_inbox_views":0, "offer_challenges_prepared":0, "buyer_intent_challenges_prepared":0, "seller_ack_challenges_prepared":0, "signed_offers_published":0, "intent_proposals_published":0, "intent_acceptances":0}
+usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0, "buyer_studio_views":0, "provider_studio_views":0, "buyer_landing_views":0, "provider_landing_views":0, "seller_inbox_views":0, "offer_challenges_prepared":0, "buyer_intent_challenges_prepared":0, "seller_ack_challenges_prepared":0, "signed_offers_published":0, "intent_proposals_published":0, "intent_acceptances":0}
 def usage_event(kind):
     # Counts are process-local and contain NO wallet address, private key or IP.
     if kind in usage_events:
@@ -336,14 +336,18 @@ async def public_agent_skill():
                                  "X-Content-Type-Options":"nosniff"})
 
 @app.get("/hire-ai-agent")
-async def organic_buyer_landing():
+async def organic_buyer_landing(request:Request):
+    if request.headers.get("user-agent","")!="AI-Market-Official-Business-Audit/1.0":
+        usage_event("buyer_landing_views")
     return FileResponse(Path(__file__).resolve().parent/"client"/"hire-agent.html",
         media_type="text/html",headers={"Cache-Control":"public, max-age=600",
         "X-Content-Type-Options":"nosniff",
         "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"})
 
 @app.get("/sell-ai-services")
-async def organic_seller_landing():
+async def organic_seller_landing(request:Request):
+    if request.headers.get("user-agent","")!="AI-Market-Official-Business-Audit/1.0":
+        usage_event("provider_landing_views")
     return FileResponse(Path(__file__).resolve().parent/"client"/"sell-services.html",
         media_type="text/html",headers={"Cache-Control":"public, max-age=600",
         "X-Content-Type-Options":"nosniff",
