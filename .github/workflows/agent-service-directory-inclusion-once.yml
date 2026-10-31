@@ -1,0 +1,82 @@
+name: Offer genuine AI Market marketplace for third-party agent directory inclusion once
+on:
+  push:
+    branches: [growth/agent-service-directory-one-honest-inclusion-20261031]
+    paths:
+      - .github/workflows/agent-service-directory-inclusion-once.yml
+permissions:
+  contents: read
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check actual public discovery index, request factual missing-service review at most once
+        run: |
+          python3 - <<'PY'
+          import json,urllib.request,urllib.error,urllib.parse
+          origin="https://aimarket-997u.onrender.com"
+          directory="https://agentservicedirectory.com"
+          expected="9eb4914c8f3f6f38285b81e100adb25b6ce0ab9b"
+          headers={"User-Agent":"AI-Market-Operator-Factual-Free-Directory-Request/1.0",
+                   "Accept":"application/json"}
+          def req(url,method="GET",payload=None):
+              h=dict(headers)
+              data=None
+              if payload is not None:
+                  h["Content-Type"]="application/json"
+                  data=json.dumps(payload).encode("utf-8")
+              r=urllib.request.Request(url,method=method,headers=h,data=data)
+              with urllib.request.urlopen(r,timeout=25) as ans:
+                  return ans.status,json.loads(ans.read(400000).decode("utf-8","replace"))
+          _,health=req(origin+"/health")
+          if health.get("deployed_git_sha")!=expected:
+              raise RuntimeError("Exact live SHA not current: no directory request")
+          _,card=req(origin+"/.well-known/agent-card.json")
+          if not (isinstance(card,dict) and any(isinstance(x,dict) and x.get("url")==origin+"/a2a"
+              for x in card.get("supportedInterfaces",[]))):
+              raise RuntimeError("Live A2A card unavailable: no directory request")
+          _,found=req(directory+"/api/v1/services?host="+urllib.parse.quote("aimarket-997u.onrender.com",safe="")+"&scope=index&limit=100")
+          if not isinstance(found,dict):
+              raise RuntimeError("Unverified directory API: refuse to post")
+          rows=found.get("results")
+          if not isinstance(rows,list):
+              print("INDEX_UNEXPECTED_RESPONSE",str(sorted(found.keys()))[:400])
+              raise RuntimeError("Cannot check for duplicate indexed service")
+          matching=[]
+          for item in rows:
+              if not isinstance(item,dict):continue
+              if origin in json.dumps({k:item.get(k) for k in ("url","endpoint","source_url","host","name","urls")},default=str).lower():
+                  matching.append((str(item.get("id",""))[:80],str(item.get("name",""))[:100]))
+          print("DIRECTORY_RECORDS_FOR_HOST",len(rows))
+          if matching:
+              print("AI_MARKET_ALREADY_IN_DIRECTORY_INDEX",matching[:4])
+              raise SystemExit(0)
+          request={
+              "kind":"missing_service",
+              "about":origin,
+              "note":(
+                  "Operator-submitted factual addition for possible independent review: "
+                  "AI Market is an experimental agent-to-agent digital services discovery marketplace "
+                  "with a live, public read-only MCP endpoint "+origin+"/mcp and live read-only "
+                  "A2A 1.0 JSONRPC discovery at "+origin+"/a2a, AgentCard at "+
+                  origin+"/.well-known/agent-card.json . "
+                  "Public market statistics: "+origin+"/api/market/stats ; "
+                  "source: https://github.com/bracha55555-hue/aimarket . "
+                  "Independently signed free/paid self-declared offline service offers and unfunded buyer needs; "
+                  "no escrow, no platform-run paid settlement, no guaranteed response or work delivery. "
+                  "As of current process: zero independently verified users, zero signed offers, "
+                  "zero buyer needs, zero verified settlements. Public reading is no-key/no-cost, "
+                  "write operations require local EIP-191 identity signatures. "
+                  "BTC, ETH, SOL, TRX quote currencies, advertised 2% fee only on eligible completed crypto trades. "
+                  "Please review and independently verify protocol, uptime and listing eligibility; "
+                  "do not interpret this as a review, endorsement or traffic proof."
+              )
+          }
+          status,receipt=req(directory+"/api/v1/feedback","POST",request)
+          if status not in (200,201,202):
+              raise RuntimeError("Service directory did not accept request")
+          print("DIRECTORY_INCLUSION_REQUEST_ACCEPTED",status)
+          print("DIRECTORY_RESPONSE_KEYS",sorted(receipt.keys())[:25] if isinstance(receipt,dict) else str(type(receipt)))
+          print("THIS IS A REVIEW REQUEST, NOT A PUBLISHED DIRECTORY LISTING, A BUYER, A PROVIDER OR A TRANSACTION")
+          PY
