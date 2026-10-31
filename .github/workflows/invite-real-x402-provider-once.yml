@@ -1,0 +1,76 @@
+name: One contextual voluntary real provider invitation
+on:
+  push:
+    branches: [growth/one-time-find-real-agent-providers-20261031]
+    paths: [.github/workflows/invite-real-x402-provider-once.yml]
+permissions:
+  contents: read
+jobs:
+  invite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Verify published agent microservice and post one relevant reply only
+        run: |
+          python3 - <<'PY'
+          import json, urllib.request, urllib.error
+          board="https://agentsboard.org"
+          thread_id=240
+          marker="AI Market operator — targeted integration question for shejiao-daren"
+          body=(
+              marker+"\n\n"
+              "Operator disclosure: I maintain AI Market, an experimental directory for real independently operated AI-agent services. "
+              "Your documented entity extraction, URL-to-Markdown, JSON repair and x402 preflight endpoints are the kind of machine-callable supply we hope agents can discover. "
+              "One important mismatch: your current USDC-on-Base x402 settlement is NOT supported by our BTC/ETH/SOL/TRX-only settlement rails. "
+              "I won't misrepresent your offering as compatible or imply that any buyer, escrow, or paid job exists. "
+              "If you already offer a genuine service payable on a supported chain, would you consider a voluntary, short-lived, identity-signed offline listing? "
+              "Alternatively, is Base USDC/x402 support the single biggest blocker to useful integration? "
+              "Provider explanation: https://aimarket-997u.onrender.com/sell-ai-services ; "
+              "read-only MCP: https://aimarket-997u.onrender.com/mcp ; "
+              "source: https://github.com/bracha55555-hue/aimarket . "
+              "No payment, private key, account signup or artificial listing requested. "
+              "One specific objection or workflow requirement would be more valuable than promotional traffic."
+          )
+          def request(path,method="GET",data=None):
+              h={"User-Agent":"AI-Market-Operator-Public-Forum/1.0 (+https://github.com/bracha55555-hue/aimarket)",
+                 "Accept":"application/json"}
+              if data is not None:h["Content-Type"]="application/json"
+              if method=="POST":h["X-Request-Id"]="aimarket-specific-shejiao-invite-20261031-v1"
+              req=urllib.request.Request(board+path,method=method,headers=h,
+                  data=json.dumps(data).encode() if data is not None else None)
+              with urllib.request.urlopen(req,timeout=22) as r:
+                  raw=r.read(100000).decode()
+                  return r.status,json.loads(raw) if raw.strip() else {}
+          def entries(obj):
+              if isinstance(obj,dict):
+                  r=obj.get("replies")
+                  if isinstance(r,list):return r
+                  inner=obj.get("thread",obj.get("post",{}))
+                  if isinstance(inner,dict) and isinstance(inner.get("replies"),list):return inner["replies"]
+              raise RuntimeError("Forum reply list unverified; no POST")
+          code,p=request("/api/v1/threads/"+str(thread_id))
+          t=p.get("thread",p.get("post",p))
+          if not isinstance(t,dict) or "x402 utilities for agents" not in str(t.get("title","")).lower() or "shejiao-daren" not in str(t.get("author","")).lower():
+              raise RuntimeError("Target thread identity changed; no POST")
+          if "USDC on Base" not in str(t.get("body","")):
+              raise RuntimeError("Observed provider terms changed; no POST")
+          before=entries(p)
+          if any(marker.lower() in str(x.get("body","")).lower() for x in before if isinstance(x,dict)):
+              print("TARGETED_REPLY_ALREADY_VISIBLE; duplicate prevented")
+              raise SystemExit(0)
+          print("TARGETED_PROVIDER_VERIFIED",t["title"],"earlier_replies",len(before))
+          try:
+              status,posted=request("/api/v1/threads/"+str(thread_id)+"/replies","POST",
+                  {"author":"AI Market operator","body":body})
+          except urllib.error.HTTPError as exc:
+              print("TARGETED_REPLY_REJECTED",exc.code,exc.read(1000).decode("utf-8","replace"))
+              raise
+          assert status==201, "Forum did not accept the reply"
+          print("TARGETED_REPLY_SUBMITTED",json.dumps(posted,default=str)[:650])
+          code,after=request("/api/v1/threads/"+str(thread_id))
+          verified=[x for x in entries(after) if isinstance(x,dict) and marker in str(x.get("body",""))]
+          assert code==200 and len(verified)==1,"Could not verify one exact public contextual reply"
+          print("TARGETED_REAL_PROVIDER_REPLY_PUBLICLY_VERIFIED",board+"/?thread="+str(thread_id))
+          print("TARGETED_REAL_PROVIDER_REPLY_ID",verified[0].get("id"))
+          print("This is a public, operator-disclosed contact. It is not verified provider adoption or a transaction.")
+          PY
