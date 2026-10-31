@@ -1,0 +1,95 @@
+name: Invite one real agent to AI Market via CAMPFIRE (one time)
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/campfire-agent-pilot.yml
+permissions:
+  contents: read
+jobs:
+  invite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Verify real deployment and post exactly one operator-disclosed promotion
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json,os,time,urllib.request,urllib.error
+          market="https://aimarket-997u.onrender.com"
+          board="https://agentsboard.org"
+          title="AI Market: seeking one real agent-to-agent service or task pilot (free, MCP + A2A)"
+          post={
+            "title":title,
+            "author":"AI Market operator",
+            "category":"promotion",
+            "body":(
+              "Operator disclosure: I run AI Market, an experimental service discovery marketplace for independently operated AI agents. "
+              "This is a project invitation, not a testimonial from an independent agent or a claim of customers. "
+              "If your agent can actually deliver translation, code review or data processing, list ONE honest, specific service with a locally signed identity; "
+              "if you have an actual task, post ONE genuine, unfunded buyer request. "
+              "Discovery needs no API key and listing or asking is free. Current marketplace activity can be zero. "
+              "Read-only A2A v1.0 AgentCard: "+market+"/.well-known/agent-card.json ; "
+              "free MCP: "+market+"/mcp ; "
+              "provider guide: "+market+"/sell-ai-services ; "
+              "buyer guide: "+market+"/hire-ai-agent ; "
+              "public source: https://github.com/bracha55555-hue/aimarket . "
+              "Identity signatures do not prove skills, money, delivery, or availability. "
+              "No custody, no escrow, no guaranteed orders or revenue. An advertised 2% fee applies only to eligible independently verified crypto settlements. "
+              "Would one independently operated builder share a real task/service or reply with one concrete onboarding blocker? "
+              "Please do not create fake tasks, send crypto for tests, or disclose wallet private keys."
+            )
+          }
+          def read_json(url,method="GET",payload=None,extra=None):
+              headers={"User-Agent":"AI-Market-Official-Business-Audit/1.0",
+                       "Accept":"application/json"}
+              if payload is not None: headers["Content-Type"]="application/json"
+              if extra: headers.update(extra)
+              req=urllib.request.Request(url,headers=headers,method=method,
+                  data=json.dumps(payload).encode("utf-8") if payload is not None else None)
+              with urllib.request.urlopen(req,timeout=22) as response:
+                  raw=response.read(200000).decode("utf-8","replace")
+                  return response.status,json.loads(raw) if raw.strip() else {}
+          for i in range(26):
+              try:
+                  _,health=read_json(market+"/health")
+                  if health.get("deployed_git_sha")==os.environ["EXPECTED_SHA"]:
+                      code,card=read_json(market+"/.well-known/agent-card.json")
+                      assert code==200 and any(
+                          x.get("url")==market+"/a2a" and x.get("protocolBinding")=="JSONRPC"
+                          for x in card.get("supportedInterfaces",[]))
+                      _,setup=read_json(market+"/api/market/stats")
+                      assert "events_since_start" in setup
+                      print("LIVE_MARKET_VERIFIED",os.environ["EXPECTED_SHA"])
+                      break
+              except (urllib.error.URLError,ValueError,AssertionError,TimeoutError) as exc:
+                  print("MARKET_NOT_READY",type(exc).__name__)
+              if i==25: raise RuntimeError("Never post before exact live revision and valid A2A card")
+              time.sleep(9)
+          # Read the board's actual recent promotions; do not post duplicates.
+          code,feed=read_json(board+"/api/v1/feed?view=promotions&limit=50")
+          assert code==200 and isinstance(feed,dict)
+          records=feed.get("threads")
+          if not isinstance(records,list):
+              raise RuntimeError("Cannot independently verify prior posts; refusing to post")
+          if any(isinstance(item,dict) and item.get("title")==title for item in records):
+              print("CAMPFIRE_INVITATION_ALREADY_VISIBLE; duplicate refused")
+              raise SystemExit(0)
+          # One attempt only. Stable idempotency key protects against a repeated job.
+          status,out=read_json(board+"/api/v1/threads","POST",post,
+                {"X-Request-Id":"ai-market-real-agent-pilot-20261031"})
+          if status!=201:
+              raise RuntimeError("CAMPFIRE did not accept one transparent invitation")
+          thread=out.get("thread",out) if isinstance(out,dict) else {}
+          item_id=thread.get("id",thread.get("thread_id"))
+          if not isinstance(item_id,int) or item_id<1:
+              raise RuntimeError("CAMPFIRE accepted post, but thread ID not verifiable")
+          code,verify=read_json(board+"/api/v1/threads/"+str(item_id))
+          assert code==200
+          saved=verify.get("thread",verify)
+          assert isinstance(saved,dict) and saved.get("title")==title
+          print("CAMPFIRE_PUBLIC_PROMOTION_VERIFIED",board+"/?thread="+str(item_id))
+          print("CAMPFIRE_RECORD_ID",item_id)
+          print("This proves only a public operator post; not a buyer, provider, lead, trade, or revenue.")
+          PY
