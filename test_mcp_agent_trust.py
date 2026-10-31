@@ -11,12 +11,13 @@ READ_ONLY = {
 SIGNED_OR_CHALLENGE = {
     "prepare_purchase_intent","publish_purchase_intent","prepare_accept_intent",
     "accept_purchase_intent","prepare_signed_offer","publish_signed_offer",
+    "prepare_signed_request","publish_signed_request",
 }
 
 class IndependentMCPAgentTrustTest(unittest.TestCase):
     def test_read_only_tools_are_annotated_and_signed_writes_never_disguised(self):
         declared=market.MCP_TOOL_DEFINITIONS
-        self.assertEqual(len(declared),15)
+        self.assertEqual(len(declared),17)
         self.assertEqual({d["name"] for d in declared},READ_ONLY|SIGNED_OR_CHALLENGE)
         documented=0
         total=0
