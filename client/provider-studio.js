@@ -10,12 +10,15 @@
     const draft = JSON.parse(window.localStorage.getItem(draftKey) || "null");
     if (draft && /^[A-Za-z0-9 ._-]{1,48}$/.test(draft.capability || "") &&
         ["BTC","ETH","SOL","TRX"].includes(draft.currency) &&
-        Number(draft.price)>0 && Number(draft.price)<=100000 &&
+        Number(draft.price)>=0 && Number(draft.price)<=100000 &&
+        (Number(draft.price)>0 || (typeof draft.scope==="string" && draft.scope.length>0)) &&
         (!draft.contact || (typeof draft.contact==="string" && draft.contact.length<=240))) {
       $("capability").value=draft.capability;
       $("price").value=draft.price;
       $("currency").value=draft.currency;
       $("contact").value=draft.contact || "";
+      $("scope").value=draft.scope || "";
+      $("evidence").value=draft.evidence || "";
       $("remember").checked=true;
       status.textContent="Public listing details recovered from this browser. Re-sign manually to renew or repost. No service is currently guaranteed available.";
     }
@@ -46,15 +49,25 @@
     const price = Number($("price").value);
     const currency = $("currency").value;
     const contact = $("contact").value.trim();
+    const scope = $("scope").value.trim();
+    const evidence = $("evidence").value.trim();
     if (!/^[A-Za-z0-9 ._-]{1,48}$/.test(capability) ||
-        !Number.isFinite(price) || price <= 0 || price > 100000 ||
+        !Number.isFinite(price) || price < 0 || price > 100000 ||
         !["BTC","ETH","SOL","TRX"].includes(currency)) {
-      notify("Enter a genuine capability (1–48 characters), valid currency and positive price.", "error");
+      notify("Enter a genuine capability (1–48 characters), supported currency and nonnegative price.", "error");
+      return;
+    }
+    if ((price === 0 && !scope) || (scope && !/^[\x20-\x7E]{1,160}$/.test(scope))) {
+      notify("A free pilot needs a real scope line (up to 160 printable English characters).", "error");
       return;
     }
     if (contact && (!/^https:\/\/[^/\s?#]+\.[^/\s?#]+(?:[/?][^\s]*)?$/.test(contact) ||
         contact.length > 240)) {
       notify("A custom contact address must use a valid public HTTPS website, or leave it blank for a marketplace inbox.", "error");
+      return;
+    }
+    if (evidence && (!/^https:\/\/[^/\s?#]+\.[^/\s?#]+(?:[/?][^\s]*)?$/.test(evidence) || evidence.length > 200)) {
+      notify("An evidence link must be a public HTTPS URL, or leave it blank.", "error");
       return;
     }
     busy = true; button.disabled = true;
@@ -67,6 +80,8 @@
       const agent_id = accounts[0];
       const offer = {agent_id,capability,price,currency};
       if (contact) offer.contact_url = contact;
+      if (scope) offer.scope = scope;
+      if (evidence) offer.evidence_url = evidence;
       const challenge = await postJSON("/api/signed-offers/prepare",offer);
       if (typeof challenge.sign_this_message_exactly !== "string" ||
           typeof challenge.challenge_proof !== "string") {
@@ -89,7 +104,8 @@
       const listing = result.listing;
       $("detail").textContent = "Your signed identity " + String(listing.agent_id || agent_id) +
         " advertises " + String(listing.capability) + " for " + String(listing.price) +
-        " " + String(listing.currency) + ".";
+        " " + String(listing.currency) + "." + (listing.scope ? " Scope: "+String(listing.scope)+"." : "") +
+        (listing.evidence_url ? " Example evidence: "+String(listing.evidence_url)+" (not independently verified)." : "");
       const inbox = $("inbox");
       const url = new URL("/seller-inbox",location.origin);
       url.searchParams.set("seller",String(listing.agent_id || agent_id));
@@ -98,7 +114,7 @@
       // Explicit opt-in only; re-publishing still requires a fresh server proof and wallet signature.
       try {
         if ($("remember").checked) window.localStorage.setItem(draftKey,JSON.stringify({
-          capability,price,currency,contact
+          capability,price,currency,contact,scope,evidence
         }));
         else window.localStorage.removeItem(draftKey);
       } catch (_) { /* Do not block successful publication. */ }
