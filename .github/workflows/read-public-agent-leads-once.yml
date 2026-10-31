@@ -1,0 +1,49 @@
+name: One-off read-only independent agent lead inspection
+on:
+  push:
+    branches: [growth/one-time-find-real-agent-providers-20261031]
+    paths: [.github/workflows/read-public-agent-leads-once.yml]
+permissions:
+  contents: read
+jobs:
+  examine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Read CAMPFIRE replies, nearby real providers, and Agent Commons responses
+        run: |
+          python3 - <<'PY'
+          import json,urllib.request,urllib.parse,urllib.error
+          H={"User-Agent":"AI-Market-Operator-Read-Only-Lead-Inspection/1.0","Accept":"application/json"}
+          def get(url):
+              try:
+                  with urllib.request.urlopen(urllib.request.Request(url,headers=H),timeout=18) as r:
+                      return json.loads(r.read(750000).decode("utf-8"))
+              except (urllib.error.URLError,ValueError,TimeoutError) as e:
+                  print("READ_FAILED",url,type(e).__name__,str(e)[:120]);return {}
+          def summary(row):
+              if not isinstance(row,dict):return {}
+              return {x:str(row[x])[:200] for x in ("id","title","author","body","name","category","created_at","createdAt","replies_count","reply_count","replyCount") if x in row}
+          post=get("https://agentsboard.org/api/v1/threads/270")
+          thread=post.get("thread",post.get("post",post))
+          print("OUR_PUBLIC_CAMPFIRE_THREAD",json.dumps(summary(thread)))
+          replies=post.get("replies",thread.get("replies",[]) if isinstance(thread,dict) else [])
+          if isinstance(replies,list):
+              print("OUR_CAMPFIRE_REPLY_COUNT",len(replies))
+              for row in replies[:10]:print("OUR_CAMPFIRE_REPLY",json.dumps(summary(row)))
+          feed=get("https://agentsboard.org/api/v1/feed?view=promotions&limit=50")
+          rows=feed.get("items",feed.get("threads",[]))
+          if isinstance(rows,list):
+              print("LATEST_PROMOTION_COUNT",len(rows))
+              for row in rows[:40]:
+                  title=str(row.get("title","")).lower() if isinstance(row,dict) else ""
+                  body=str(row.get("body","")).lower() if isinstance(row,dict) else ""
+                  if "ai market" not in title and any(w in title+" "+body for w in ["service","agent","video","translate","code","design","data","studio"]):
+                      print("POTENTIAL_ACTUAL_PROVIDER",json.dumps(summary(row)))
+          commons=get("https://commons.dooza.ai/api/home?for=aimarket-operator")
+          print("COMMONS_PUBLIC_FOR_YOU",json.dumps(commons.get("forYou",[]),default=str)[:2400])
+          print("COMMONS_PUBLIC_WAITING",json.dumps(commons.get("openItems",{}),default=str)[:2000])
+          human=get("https://commons.dooza.ai/api/human-requests?agent=aimarket-operator&limit=20")
+          print("COMMONS_OWN_HUMAN_REQUESTS",json.dumps(human,default=str)[:2400])
+          print("All results are unverified public posts; no replies, jobs, registrations or payments created")
+          PY
