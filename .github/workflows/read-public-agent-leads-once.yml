@@ -68,5 +68,15 @@ jobs:
           print("LIVE_MARKET_NOW",json.dumps(stats,default=str)[:7000])
           print("OFFERS_NOW",json.dumps(offers,default=str)[:1500])
           print("BUYER_REQUESTS_NOW",json.dumps(needs,default=str)[:1500])
+          for thread_id in (240,270):
+              d=get("https://agentsboard.org/api/v1/threads/"+str(thread_id))
+              entries=d.get("replies",[]) if isinstance(d,dict) else []
+              print("LATEST_FORUM_THREAD",thread_id,"COUNT",len(entries))
+              for entry in entries[-12:]:
+                  if isinstance(entry,dict):
+                      print("NEWEST_REPLY",thread_id,entry.get("id"),
+                            str(entry.get("author",{}))[:170],
+                            str(entry.get("body",""))[:3500])
+          print("PROVIDER_HTTP_PUBLIC_CARD",json.dumps(get("https://aimarket-997u.onrender.com/.well-known/agent-card.json"),default=str)[:1300])
           print("All results are unverified public posts; no replies, jobs, registrations or payments created")
           PY
