@@ -175,8 +175,8 @@ def publish_offer(transport, key, capability, currency, price, contact_url=None,
     listing=result.get("listing")
     if not isinstance(listing,dict) or listing.get("agent_id")!=account.address.lower() or \
        listing.get("currency")!=currency or listing.get("capability")!=capability.strip().casefold() or \
-       listing.get("price")!=float(price) or
-       (scope is not None and listing.get("scope")!=scope.strip()) or
+       listing.get("price")!=float(price) or \
+       (scope is not None and listing.get("scope")!=scope.strip()) or \
        (evidence_url is not None and listing.get("evidence_url")!=evidence_url):
         raise RuntimeError("Server confirmed a different listing")
     return {"published":True,"agent_id":account.address,"capability":listing["capability"],
