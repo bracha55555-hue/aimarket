@@ -51,6 +51,10 @@ jobs:
           print("DIRECTORY_RECORDS_FOR_HOST",len(rows))
           if matching:
               print("AI_MARKET_ALREADY_IN_DIRECTORY_INDEX",matching[:4])
+              if matching[0][0].startswith("cand_"):
+                  _,details=req(directory+"/api/v1/services/"+urllib.parse.quote(matching[0][0],safe=""))
+                  if isinstance(details,dict):
+                      print("EXTERNAL_LISTING_DETAIL",json.dumps(details,default=str)[:9500])
               raise SystemExit(0)
           request={
               "kind":"missing_service",
