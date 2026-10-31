@@ -39,7 +39,7 @@ jobs:
           _,found=req(directory+"/api/v1/services?host="+urllib.parse.quote("aimarket-997u.onrender.com",safe="")+"&scope=index&limit=100")
           if not isinstance(found,dict):
               raise RuntimeError("Unverified directory API: refuse to post")
-          rows=found.get("results")
+          rows=found.get("items",found.get("results"))
           if not isinstance(rows,list):
               print("INDEX_UNEXPECTED_RESPONSE",str(sorted(found.keys()))[:400])
               raise RuntimeError("Cannot check for duplicate indexed service")
