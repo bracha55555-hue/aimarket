@@ -312,6 +312,13 @@ async def discovery_head():
 async def mcp_discovery_head():
     return Response(status_code=200,headers={"Allow":"POST"})
 
+@app.get("/f37a1f8f9550946afe81256013058e21.txt")
+async def indexnow_ownership():
+    # Public Search IndexNow ownership verification, not an API secret.
+    return Response("f37a1f8f9550946afe81256013058e21",media_type="text/plain",
+        headers={"Cache-Control":"public, max-age=3600",
+                 "X-Content-Type-Options":"nosniff"})
+
 @app.get("/robots.txt")
 async def robots_txt():
     return Response("User-agent: *\nAllow: /\nSitemap: "+PUBLIC_SERVER_URL.rstrip("/")+"/sitemap.xml\n",media_type="text/plain")

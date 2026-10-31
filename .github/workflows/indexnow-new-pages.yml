@@ -1,0 +1,62 @@
+name: Notify IndexNow once for actual new buyer and provider pages
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/indexnow-new-pages.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Verify exact live revision and real indexable pages before announcing
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json,os,time,urllib.request,urllib.error
+          root="https://aimarket-997u.onrender.com"
+          key="f37a1f8f9550946afe81256013058e21"
+          paths=["/","/hire-ai-agent","/sell-ai-services"]
+          def get(path):
+              req=urllib.request.Request(root+path,headers={"User-Agent":"AI-Market-IndexNow-Official/1.0","Accept":"text/html"})
+              with urllib.request.urlopen(req,timeout=20) as f:
+                  return f.status,f.read(120000).decode("utf-8","replace")
+          for attempt in range(18):
+              try:
+                  req=urllib.request.Request(root+"/health",headers={"User-Agent":"AI-Market-IndexNow-Official/1.0"})
+                  with urllib.request.urlopen(req,timeout=20) as r:
+                      health=json.loads(r.read(20000))
+                  if health.get("deployed_git_sha")==os.environ["EXPECTED_SHA"]:
+                      print("Verified live SHA:",health["deployed_git_sha"])
+                      break
+                  print("Live SHA not updated yet; attempt",attempt+1)
+              except (urllib.error.URLError,ValueError,TimeoutError) as exc:
+                  print("Live check not ready:",type(exc).__name__)
+              if attempt==17: raise RuntimeError("Refusing search submission: live revision unverified")
+              time.sleep(10)
+          status,content=get("/"+key+".txt")
+          assert status==200 and content.strip()==key, "IndexNow ownership proof missing"
+          for path in paths:
+              status,html=get(path)
+              assert status==200 and "<html" in html.lower() and "noindex" not in html.lower(),path
+              print("Confirmed live indexable:",root+path)
+          payload={"host":"aimarket-997u.onrender.com","key":key,
+                   "keyLocation":root+"/"+key+".txt",
+                   "urlList":[root+p for p in paths]}
+          req=urllib.request.Request("https://api.indexnow.org/indexnow",
+              method="POST",data=json.dumps(payload).encode(),
+              headers={"Content-Type":"application/json","User-Agent":"AI-Market-IndexNow-Official/1.0"})
+          try:
+              with urllib.request.urlopen(req,timeout=30) as response:
+                  print("INDEXNOW_STATUS",response.status)
+                  print("INDEXNOW_RESPONSE",response.read(2000).decode("utf-8","replace"))
+                  if response.status not in (200,202): raise RuntimeError("IndexNow submission not accepted")
+          except urllib.error.HTTPError as exc:
+              print("INDEXNOW_HTTP_ERROR",exc.code,exc.read(2000).decode("utf-8","replace"))
+              raise
+          print("INDEXNOW_NOTIFIED_ONLY: not a guarantee of crawl, index, visitors, leads or revenue")
+          PY
