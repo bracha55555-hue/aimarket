@@ -29,6 +29,8 @@ jobs:
           PY
       - name: Verify host-owned one-time organic IndexNow notification without false adoption
         run: python -m unittest -v test_indexnow_new_pages.py
+      - name: Verify genuine read-only A2A 1.0 AgentCard and JSONRPC service
+        run: python -m unittest -v test_a2a_discovery.py
       - name: Verify public role-specific organic buyer and provider landing pages
         run: python -m unittest -v test_organic_landing.py
       - name: Verify business homepage shows real market state and safely escapes untrusted offers
@@ -199,7 +201,8 @@ jobs:
               assert data["name"]=="io.github.bracha55555-hue/aimarket"
               assert data["url"].endswith("/mcp") and data["transport"]=="streamable-http"
               assert data["free_discovery"] is True and data["escrow"] is False
-              assert data["a2a_protocol_supported"] is False
+              assert data["a2a_protocol_supported"] is True
+              assert data["a2a_jsonrpc"].endswith("/a2a")
               assert c.get("/api/market/stats").json()["events_since_start"]==before
               assert c.get("/api/requests").json()["count"]==0
           print("PASS: independent directory verification without fake agents or payments")

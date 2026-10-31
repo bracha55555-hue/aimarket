@@ -68,7 +68,7 @@ if not logger.handlers:
     logger.addHandler(_usage_handler)
 logger.propagate = False
 usage_started_at = datetime.now(timezone.utc).isoformat()
-usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0, "buyer_studio_views":0, "provider_studio_views":0, "buyer_landing_views":0, "provider_landing_views":0, "seller_inbox_views":0, "offer_challenges_prepared":0, "buyer_intent_challenges_prepared":0, "seller_ack_challenges_prepared":0, "signed_offers_published":0, "intent_proposals_published":0, "intent_acceptances":0}
+usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0, "buyer_studio_views":0, "provider_studio_views":0, "buyer_landing_views":0, "provider_landing_views":0, "seller_inbox_views":0, "a2a_discovery_calls":0, "offer_challenges_prepared":0, "buyer_intent_challenges_prepared":0, "seller_ack_challenges_prepared":0, "signed_offers_published":0, "intent_proposals_published":0, "intent_acceptances":0}
 def usage_event(kind):
     # Counts are process-local and contain NO wallet address, private key or IP.
     if kind in usage_events:
@@ -326,7 +326,7 @@ async def robots_txt():
 @app.get("/sitemap.xml")
 async def sitemap_xml():
     base=PUBLIC_SERVER_URL.rstrip("/")
-    paths=["/","/hire-ai-agent","/sell-ai-services","/connect","/feed.xml","/post-job","/jobs","/list-service","/seller-inbox","/api/signed-offers","/client/publish-offer.py","/client/post-job.py","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
+    paths=["/","/.well-known/agent-card.json","/a2a","/hire-ai-agent","/sell-ai-services","/connect","/feed.xml","/post-job","/jobs","/list-service","/seller-inbox","/api/signed-offers","/client/publish-offer.py","/client/post-job.py","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
     xml='<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
     xml+="".join("<url><loc>"+base+p+"</loc></url>" for p in paths)+"</urlset>"
     return Response(xml,media_type="application/xml")
@@ -1262,7 +1262,7 @@ __SUPPLY_LIST__
         return HTMLResponse(page,headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff",
             "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"})
 
-    return {"post_real_job":"/post-job","live_job_board":"/jobs","free_agent_flight_check":"/api/agent/flight-check","one_call_market": "/api/agent/now", "real_buyer_requests":"/api/requests", "service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "fee_rate": 0.02, "payment_settlement": "signed_wallet_payments", "eth_quote": "/api/payments/eth/quote", "eth_verify": "/api/payments/eth/verify", "eth_client": "/client/eth-pay.js", "btc_quote": "/api/payments/btc/quote", "btc_verify": "/api/payments/btc/verify", "btc_agent": "/client/btc-agent.py", "native_quote": "/api/payments/native/quote", "native_verify": "/api/payments/native/verify", "native_client": "/client/native-agent.py", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
+    return {"post_real_job":"/post-job","live_job_board":"/jobs","free_agent_flight_check":"/api/agent/flight-check","one_call_market": "/api/agent/now", "real_buyer_requests":"/api/requests", "service": "AI Market", "purpose": "AI-agent service discovery and trade coordination", "documentation": "/docs", "health": "/health", "directory": "/api/agents", "compact_directory": "/api/agents?format=n4", "n4_decoder": "/client/n4.js", "machine_readable": "/.well-known/ai-market.json", "websocket": "/ws/registry", "mcp": "/mcp", "a2a_agent_card": "/.well-known/agent-card.json", "a2a_jsonrpc": "/a2a", "fee_rate": 0.02, "payment_settlement": "signed_wallet_payments", "eth_quote": "/api/payments/eth/quote", "eth_verify": "/api/payments/eth/verify", "eth_client": "/client/eth-pay.js", "btc_quote": "/api/payments/btc/quote", "btc_verify": "/api/payments/btc/verify", "btc_agent": "/client/btc-agent.py", "native_quote": "/api/payments/native/quote", "native_verify": "/api/payments/native/verify", "native_client": "/client/native-agent.py", "escrow": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS}
 
 @app.get("/.well-known/mcp.json")
 async def mcp_public_well_known():
@@ -1274,11 +1274,12 @@ async def mcp_public_well_known():
             "version":"1.5.0",
             "protocol":"mcp","transport":"streamable-http",
             "url":base+"/mcp","repository":"https://github.com/bracha55555-hue/aimarket",
-            "free_discovery":True,"escrow":False,"a2a_protocol_supported":False}
+            "free_discovery":True,"escrow":False,"a2a_protocol_supported":True,
+             "a2a_agent_card":base+"/.well-known/agent-card.json","a2a_jsonrpc":base+"/a2a"}
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "connect_no_key":PUBLIC_SERVER_URL.rstrip("/")+"/connect", "real_opportunities_rss":PUBLIC_SERVER_URL.rstrip("/")+"/feed.xml", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "agent_flight_check":PUBLIC_SERVER_URL.rstrip("/")+"/api/agent/flight-check", "portable_agent_skill": PUBLIC_SERVER_URL.rstrip("/") + "/skills/ai-market/SKILL.md", "install_instructions":PUBLIC_SERVER_URL.rstrip("/") + "/api/install", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "buyer_studio":PUBLIC_SERVER_URL.rstrip("/") + "/post-job", "mcp_signed_buyer_tools": ["prepare_signed_request","publish_signed_request"], "headless_buyer_client":PUBLIC_SERVER_URL.rstrip("/") + "/client/post-job.py", "job_board":PUBLIC_SERVER_URL.rstrip("/") + "/jobs", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. Live proof verification exists for BTC, ETH, SOL and TRX, but end-to-end real-money settlements are not independently certified; ETH/TRX require two transfers."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "connect_no_key":PUBLIC_SERVER_URL.rstrip("/")+"/connect", "real_opportunities_rss":PUBLIC_SERVER_URL.rstrip("/")+"/feed.xml", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "a2a_jsonrpc": PUBLIC_SERVER_URL.rstrip("/") + "/a2a", "a2a_protocol_supported":True, "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "agent_flight_check":PUBLIC_SERVER_URL.rstrip("/")+"/api/agent/flight-check", "portable_agent_skill": PUBLIC_SERVER_URL.rstrip("/") + "/skills/ai-market/SKILL.md", "install_instructions":PUBLIC_SERVER_URL.rstrip("/") + "/api/install", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "buyer_studio":PUBLIC_SERVER_URL.rstrip("/") + "/post-job", "mcp_signed_buyer_tools": ["prepare_signed_request","publish_signed_request"], "headless_buyer_client":PUBLIC_SERVER_URL.rstrip("/") + "/client/post-job.py", "job_board":PUBLIC_SERVER_URL.rstrip("/") + "/jobs", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. Live proof verification exists for BTC, ETH, SOL and TRX, but end-to-end real-money settlements are not independently certified; ETH/TRX require two transfers."}
 
 def encode_n4_directory(safe):
     # Lossless, optional compact representation for non-financial service metadata.
@@ -1869,15 +1870,109 @@ async def legacy_mcp_request(request, msg):
 @app.get("/.well-known/agent-card.json")
 @app.get("/.well-known/agent.json")
 async def honest_agent_discovery():
-    # This directory is an MCP/tool provider, NOT a full A2A JSON-RPC server.
-    # Do not advertise A2A supportedInterfaces without a working A2A task endpoint.
+    # Real A2A v1.0 JSON-RPC SendMessage; only synchronous read-only directory discovery.
     base=PUBLIC_SERVER_URL.rstrip("/")
-    return {"name":"AI Market — AI agent discovery", "description":"Find verified live AI service offers and actual buyer requests",
-            "a2aProtocolSupported":False,"protocol":"MCP Streamable HTTP",
-            "mcpEndpoint":base+"/mcp","mcpVersions":[MCP_VERSION,*LEGACY_MCP_VERSIONS],
-            "machineReadableOnboarding":base+"/api/onboarding",
-            "customAgentRegistry":base.replace("https://","wss://").replace("http://","ws://")+"/ws/registry",
-            "disclaimer":"This is discovery metadata only, not an A2A AgentCard asserting A2A compliance."}
+    return {"name":"AI Market Discovery", "version":"1.6.0",
+            "description":"Read-only directory of genuine identity-signed AI service listings and real unfunded buyer tasks. Empty results are normal; no service fulfillment or payment.",
+            "supportedInterfaces":[{"url":base+"/a2a","protocolBinding":"JSONRPC","protocolVersion":"1.0"}],
+            "capabilities":{"streaming":False,"pushNotifications":False},
+            "defaultInputModes":["text/plain"],"defaultOutputModes":["text/plain","application/json"],
+            "documentationUrl":base+"/connect",
+            "skills":[
+                {"id":"read_real_service_offers","name":"Read genuine service offers",
+                 "description":"Return current identity-signed OFFLINE service advertisements, not verified skills or availability.",
+                 "tags":["discovery","services","offline","read-only"],
+                 "examples":["offers","offers:translation"]},
+                {"id":"read_unfunded_buyer_requests","name":"Read actual unfunded requests",
+                 "description":"Return current real identity-signed buyer requests, not funded orders or confirmed work.",
+                 "tags":["discovery","buyer-demand","read-only"],
+                 "examples":["requests","market"]}]}
+
+@app.post("/a2a")
+async def a2a_readonly_discovery(request:Request):
+    # JSON-RPC binding for A2A 1.0. No task execution, purchases, escrow, auto-posting or agent creation.
+    def error(request_id,code,message,http_status=400):
+        return JSONResponse({"jsonrpc":"2.0","id":request_id,
+                             "error":{"code":code,"message":message}},status_code=http_status)
+    version=request.headers.get("a2a-version")
+    if version is not None and version!="1.0":
+        return error(None,-32600,"Only A2A JSONRPC 1.0 is implemented")
+    raw=await request.body()
+    if len(raw)>4096:
+        return error(None,-32600,"A2A request too large",413)
+    try: data=json.loads(raw)
+    except (ValueError,UnicodeDecodeError):
+        return error(None,-32700,"Invalid JSON")
+    if not isinstance(data,dict):
+        return error(None,-32600,"JSON-RPC object required")
+    request_id=data.get("id")
+    if type(request_id) not in (int,str) or isinstance(request_id,str) and len(request_id)>128:
+        return error(None,-32600,"JSON-RPC request id required")
+    if data.get("jsonrpc")!="2.0" or not isinstance(data.get("method"),str):
+        return error(request_id,-32600,"Invalid JSON-RPC envelope")
+    if data["method"]!="SendMessage":
+        return error(request_id,-32601,"Read-only A2A only supports SendMessage")
+    params=data.get("params")
+    message=params.get("message") if isinstance(params,dict) else None
+    if not isinstance(message,dict) or message.get("role")!="ROLE_USER" or "taskId" in message:
+        return error(request_id,-32602,"New user message without taskId required")
+    if not isinstance(message.get("messageId"),str) or not 1<=len(message["messageId"])<=128:
+        return error(request_id,-32602,"Valid messageId required")
+    context=message.get("contextId")
+    if context is not None and (not isinstance(context,str) or not 1<=len(context)<=128):
+        return error(request_id,-32602,"Invalid contextId")
+    parts=message.get("parts")
+    if not isinstance(parts,list) or len(parts)!=1 or not isinstance(parts[0],dict):
+        return error(request_id,-32602,"Exactly one text part required")
+    part=parts[0]
+    if set(part)!={"text"} or not isinstance(part["text"],str) or len(part["text"])>100:
+        return error(request_id,-32602,"Text command only (maximum 100 characters)")
+    cmd=part["text"].strip().lower()
+    if cmd in ("requests","buyers","jobs"):
+        kind="requests"
+        cap=None
+    elif cmd in ("offers","services"):
+        kind="offers"
+        cap=None
+    elif cmd.startswith("offers:") and re.fullmatch(r"[a-z0-9 ._-]{1,48}",cmd[7:]):
+        kind="offers"
+        cap=cmd[7:].strip()
+    elif cmd in ("market","status","help"):
+        kind="market"
+        cap=None
+    else:
+        return error(request_id,-32602,
+                     "Read-only commands: market, requests, offers, offers:translation")
+    async with state_lock:
+        expire_stale_trades()
+        needs=[public_need(row) for row in open_needs.values()]
+        offers=[dict(row) for row in signed_offers.values()
+                if cap is None or cap.casefold() in row["capability"]]
+        online=sum(bool(p.get("identity_verified")) for p in agent_profiles.values())
+    if kind=="requests":
+        payload={"request_count":len(needs),"unfunded_requests":needs[:MAX_PUBLIC_NEEDS]}
+    elif kind=="offers":
+        payload={"offer_count":len(offers),"identity_signed_offline_offers":offers[:MAX_AGENTS]}
+    else:
+        payload={"online_identity_verified_agents":online,"buyer_request_count":len(needs),
+                 "signed_offline_offer_count":len(offers),
+                 "public_requests_url":PUBLIC_SERVER_URL.rstrip("/")+"/api/requests",
+                 "public_offers_url":PUBLIC_SERVER_URL.rstrip("/")+"/api/signed-offers"}
+    payload["escrow"]=False
+    payload["funds_reserved"]=False
+    payload["service_delivery_verified"]=False
+    payload["persistence"]="Ephemeral; may reset before 24h / 72h expiry on free-host restart"
+    payload["disclaimer"]="Signed identity is not verified skills or funding. Nothing here executes service work, initiates payment or accepts an order."
+    if request.headers.get("user-agent","") not in ("AI-Market-Official-Business-Audit/1.0","AI-Market-IndexNow-Official/1.0"):
+        usage_event("a2a_discovery_calls")
+    text_summary=("Read-only AI Market "+kind+": "+
+                  str(payload.get("request_count",payload.get("offer_count",payload.get("buyer_request_count",0))))+
+                  " matching entries/request count. No funded orders, escrow or service execution.")
+    response={"message":{"messageId":uuid.uuid4().hex,
+                          "contextId":context or uuid.uuid4().hex,
+                          "role":"ROLE_AGENT","parts":[{"text":text_summary},
+                          {"data":payload,"mediaType":"application/json"}]}}
+    return {"jsonrpc":"2.0","id":request_id,"result":response}
 
 @app.get("/.well-known/ai-catalog.json")
 async def ai_catalog_discovery():
