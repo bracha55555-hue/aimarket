@@ -20,7 +20,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import json,os,re,urllib.parse,urllib.request,urllib.error
+          import hashlib,json,os,re,urllib.parse,urllib.request,urllib.error
           REPO=os.environ["GITHUB_REPOSITORY"]
           API="https://api.github.com/repos/"+REPO
           H={"Accept":"application/vnd.github+json",
@@ -50,28 +50,27 @@ jobs:
                        and r["id"]>518 and
                        "shejiao-daren" in str(r.get("author",{})).lower() and
                        len(str(r.get("body","")).strip())>15]
-              if replies:
-                  leads.append(("AI MARKET lead: NewBotLabor response",
-                      "An independent public author using the name shejiao-daren has replied after our outreach comment #518. "
-                      "This public handle is not independently verified. Review the actual response before acting: "
-                      "https://agentsboard.org/?thread=240\n\nReply IDs: "+
-                      ", ".join(str(r["id"]) for r in replies[:8])+
-                      "\nDo not infer any agreement, financial commitment, integration, or completed trade."))
+              for reply in sorted(replies,key=lambda x:x["id"],reverse=True)[:5]:
+                  leads.append(("AI MARKET: supplier response "+str(reply["id"])+" in thread 240",
+                      "A public handle named shejiao-daren posted reply #"+str(reply["id"])+
+                      " after our relevant outreach. Identity and interest are unverified. Read the original: "+
+                      "https://agentsboard.org/?thread=240. No agreement, order or money is implied."))
               print("CAMPFIRE_PROVIDER_REPLIES",len(replies))
           else:print("CAMPFIRE_PROVIDER_REPLIES_UNKNOWN")
           initial=get_thread(270)
           if initial is not None:
               replies=[r for r in initial if isinstance(r,dict)
+                  and isinstance(r.get("id"),int) and r["id"]>520
                   and "ai market operator" not in str(r.get("author",{})).lower()
                   and len(str(r.get("body","")).strip())>35
                   and any(w in str(r.get("body","")).lower() for w in
                       ("mcp","a2a","service","provider","task","agent","listing","help","offer"))]
-              if replies:
-                  leads.append(("AI MARKET lead: external response to our public launch",
-                      "A third-party-labeled public reply appeared on the AI MARKET launch discussion. "
-                      "Public names are unverified; inspect for spam before any follow-up. "
-                      "https://agentsboard.org/?thread=270\n\nReply IDs: "+
-                      ", ".join(str(r.get("id")) for r in replies[:8])))
+              for reply in sorted(replies,key=lambda x:x["id"],reverse=True)[:5]:
+                  leads.append(("AI MARKET: external reply "+str(reply["id"])+" in thread 270",
+                      "A new public-handle reply #"+str(reply["id"])+
+                      " appeared after our independent pilot onboarding (#520). "+
+                      "Public aliases are not identity-verified; review the exact message for a genuine lead: "+
+                      "https://agentsboard.org/?thread=270. No signed listing, agreement or payment inferred."))
               print("CAMPFIRE_LAUNCH_REPLIES",len(replies))
           else:print("CAMPFIRE_LAUNCH_REPLIES_UNKNOWN")
           m=get("https://aimarket-997u.onrender.com/api/market/stats")
@@ -79,12 +78,37 @@ jobs:
               offers=int(m.get("signed_offline_offers") or 0)
               buyers=int(m.get("open_verified_buyer_requests") or 0)
               online=int(m.get("authenticated_online_agents") or 0)
-              if offers>0 or buyers>0 or online>0:
-                  leads.append(("AI MARKET activity: nonzero live signed supply or demand",
-                       f"Read-only live process snapshot: identity-signed offline offers={offers}; "
-                       f"unfunded signed buyer needs={buyers}; authenticated online agents={online}. "
-                       "Operator independence, provider competence, funds, and fulfillment are NOT proven by these figures. "
-                       "https://aimarket-997u.onrender.com/api/market/stats"))
+              if online>0:
+                  leads.append(("AI MARKET: first online identity-authenticated agents",
+                      "Production has at least one online agent session. Verify source and identity "+
+                      "before assuming independence or availability: "+
+                      "https://aimarket-997u.onrender.com/api/market/stats . No orders/payments implied."))
+              if offers>0:
+                  catalog=get("https://aimarket-997u.onrender.com/api/signed-offers")
+                  rows=catalog.get("signed_offline_offers") if isinstance(catalog,dict) else None
+                  if isinstance(rows,list):
+                      for offer in rows[:10]:
+                          if not isinstance(offer,dict) or not isinstance(offer.get("offer_id"),str):continue
+                          digest=hashlib.sha256(offer["offer_id"].encode()).hexdigest()[:12]
+                          leads.append(("AI MARKET: signed offer detected "+digest,
+                              "Production contains a newly observed identity-signed offline service advertisement. "+
+                              "Inspect the current public catalog: https://aimarket-997u.onrender.com/api/signed-offers "+
+                              "Signature verifies key control only, not operator independence, ability, response, "+
+                              "payment or service delivery. No secret key or user-entered content included here."))
+                  else: print("OFFERS_CATALOG_UNVERIFIED_NO_ISSUE")
+              if buyers>0:
+                  demand=get("https://aimarket-997u.onrender.com/api/requests")
+                  rows=demand.get("verified_buyer_requests") if isinstance(demand,dict) else None
+                  if isinstance(rows,list):
+                      for item in rows[:10]:
+                          if not isinstance(item,dict) or not isinstance(item.get("id"),str):continue
+                          digest=hashlib.sha256(item["id"].encode()).hexdigest()[:12]
+                          leads.append(("AI MARKET: signed buyer request detected "+digest,
+                              "Production contains an identity-signed unfunded real task request. "+
+                              "Review its current public terms: https://aimarket-997u.onrender.com/api/requests "+
+                              "Neither funds, operator independence nor a binding order are verified. "+
+                              "No customer-entered task text included in this notification."))
+                  else: print("DEMAND_CATALOG_UNVERIFIED_NO_ISSUE")
               print("LIVE_NONZERO_ACTIVITY",int(offers>0 or buyers>0 or online>0))
           else:print("LIVE_MARKET_READ_FAILED")
           if not leads:
@@ -93,7 +117,7 @@ jobs:
           existing=get(API+"/issues?state=all&per_page=100",github=True)
           if not isinstance(existing,list):raise RuntimeError("Cannot deduplicate notification issue; no writes")
           present={r.get("title") for r in existing if isinstance(r,dict) and not r.get("pull_request")}
-          for title,description in leads:
+          for title,description in leads[:10]:
               if title in present:
                   print("LEAD_ALREADY_RECORDED",title)
                   continue
