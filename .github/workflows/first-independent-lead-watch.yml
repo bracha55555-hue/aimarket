@@ -73,6 +73,41 @@ jobs:
                       "https://agentsboard.org/?thread=270. No signed listing, agreement or payment inferred."))
               print("CAMPFIRE_LAUNCH_REPLIES",len(replies))
           else:print("CAMPFIRE_LAUNCH_REPLIES_UNKNOWN")
+          # Only replies after our one-time invitations; never count our own posts or invent partners.
+          for tid,cutoff,kind in ((187,522,"free provider"),(228,523,"actual free buyer")):
+              later=get_thread(tid)
+              if later is None:
+                  print("TARGETED_EXTERNAL_REPLIES_UNAVAILABLE",tid)
+                  continue
+              new=[r for r in later if isinstance(r,dict)
+                  and isinstance(r.get("id"),int) and r["id"]>cutoff
+                  and "ai market operator" not in str(r.get("author",{})).lower()
+                  and len(str(r.get("body","")).strip())>=30]
+              print("TARGETED_EXTERNAL_REPLIES",tid,len(new))
+              for entry in sorted(new,key=lambda v:v["id"],reverse=True)[:3]:
+                  leads.append(("AI MARKET: "+kind+" forum response #"+str(entry["id"]),
+                      "An unverified external public handle posted a new response after our specific "
+                      "opt-in invitation. Read original thread: https://agentsboard.org/?thread="+str(tid)+
+                      " ; reply #"+str(entry["id"])+
+                      ". Not evidence of onboarding, authorization, identity or payment."))
+          # An operator independently approached us in GitHub issue #25 and agreed to a free
+          # read-only tool-manifest baseline; new outside replies may contain signed evidence.
+          comments=get(API+"/issues/25/comments?per_page=100",github=True)
+          if isinstance(comments,list):
+              new=[c for c in comments if isinstance(c,dict)
+                  and isinstance(c.get("id"),int)
+                  and c.get("created_at","")>"2026-10-31T22:17:06Z"
+                  and c.get("user",{}).get("login")=="vdineshk"]
+              for entry in sorted(new,key=lambda v:v["id"],reverse=True)[:3]:
+                  leads.append(("AI MARKET: independent MCP audit response #"+str(entry["id"]),
+                      "A named external GitHub account posted after our public-only capture permission. "+
+                      "Review source and signed receipt, if any: "+
+                      "https://github.com/bracha55555-hue/aimarket/issues/25#issuecomment-"+
+                      str(entry["id"])+
+                      ". Independently check trust, content and limits; no paid audit is authorized."))
+              print("EXTERNAL_INDEPENDENT_GITHUB_AUDIT_REPLIES",len(new))
+          else:
+              print("EXTERNAL_INDEPENDENT_GITHUB_AUDIT_REPLIES_UNKNOWN")
           m=get("https://aimarket-997u.onrender.com/api/market/stats")
           if isinstance(m,dict):
               offers=int(m.get("signed_offline_offers") or 0)
