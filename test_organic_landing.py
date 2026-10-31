@@ -8,6 +8,8 @@ class OrganicBuyerSellerLandingTest(unittest.TestCase):
             before=c.get("/api/market/stats").json()["events_since_start"]
             for path in ("/hire-ai-agent","/sell-ai-services"):
                 self.assertEqual(c.get(path,headers={"User-Agent":"AI-Market-Official-Business-Audit/1.0"}).status_code,200)
+            for path in ("/hire-ai-agent","/sell-ai-services"):
+                self.assertEqual(c.get(path,headers={"User-Agent":"AI-Market-IndexNow-Official/1.0"}).status_code,200)
             after=c.get("/api/market/stats").json()["events_since_start"]
             self.assertEqual(after["buyer_landing_views"],before["buyer_landing_views"])
             self.assertEqual(after["provider_landing_views"],before["provider_landing_views"])
