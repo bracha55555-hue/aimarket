@@ -27,6 +27,8 @@ jobs:
           assert data=={"$schema":"https://glama.ai/mcp/schemas/server.json","maintainers":["bracha55555-hue"]}
           print("PASS: Glama schema and real repository maintainer; listing/claim not asserted")
           PY
+      - name: Verify public role-specific organic buyer and provider landing pages
+        run: python -m unittest -v test_organic_landing.py
       - name: Verify business homepage shows real market state and safely escapes untrusted offers
         run: python -m unittest -v test_market_homepage.py
       - name: Verify N4 database save, reload and corruption detection

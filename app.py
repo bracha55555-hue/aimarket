@@ -68,7 +68,7 @@ if not logger.handlers:
     logger.addHandler(_usage_handler)
 logger.propagate = False
 usage_started_at = datetime.now(timezone.utc).isoformat()
-usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0, "buyer_studio_views":0, "provider_studio_views":0, "seller_inbox_views":0, "offer_challenges_prepared":0, "buyer_intent_challenges_prepared":0, "seller_ack_challenges_prepared":0, "signed_offers_published":0, "intent_proposals_published":0, "intent_acceptances":0}
+usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0, "buyer_studio_views":0, "provider_studio_views":0, "buyer_landing_views":0, "provider_landing_views":0, "seller_inbox_views":0, "offer_challenges_prepared":0, "buyer_intent_challenges_prepared":0, "seller_ack_challenges_prepared":0, "signed_offers_published":0, "intent_proposals_published":0, "intent_acceptances":0}
 def usage_event(kind):
     # Counts are process-local and contain NO wallet address, private key or IP.
     if kind in usage_events:
@@ -319,7 +319,7 @@ async def robots_txt():
 @app.get("/sitemap.xml")
 async def sitemap_xml():
     base=PUBLIC_SERVER_URL.rstrip("/")
-    paths=["/","/connect","/feed.xml","/post-job","/jobs","/list-service","/seller-inbox","/api/signed-offers","/client/publish-offer.py","/client/post-job.py","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
+    paths=["/","/hire-ai-agent","/sell-ai-services","/connect","/feed.xml","/post-job","/jobs","/list-service","/seller-inbox","/api/signed-offers","/client/publish-offer.py","/client/post-job.py","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
     xml='<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
     xml+="".join("<url><loc>"+base+p+"</loc></url>" for p in paths)+"</urlset>"
     return Response(xml,media_type="application/xml")
@@ -334,6 +334,24 @@ async def public_agent_skill():
     return FileResponse(SKILL_PATH,media_type="text/markdown",
                         headers={"Cache-Control":"public, max-age=3600",
                                  "X-Content-Type-Options":"nosniff"})
+
+@app.get("/hire-ai-agent")
+async def organic_buyer_landing(request:Request):
+    if request.headers.get("user-agent","")!="AI-Market-Official-Business-Audit/1.0":
+        usage_event("buyer_landing_views")
+    return FileResponse(Path(__file__).resolve().parent/"client"/"hire-agent.html",
+        media_type="text/html",headers={"Cache-Control":"public, max-age=600",
+        "X-Content-Type-Options":"nosniff",
+        "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"})
+
+@app.get("/sell-ai-services")
+async def organic_seller_landing(request:Request):
+    if request.headers.get("user-agent","")!="AI-Market-Official-Business-Audit/1.0":
+        usage_event("provider_landing_views")
+    return FileResponse(Path(__file__).resolve().parent/"client"/"sell-services.html",
+        media_type="text/html",headers={"Cache-Control":"public, max-age=600",
+        "X-Content-Type-Options":"nosniff",
+        "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"})
 
 @app.get("/connect")
 async def public_agent_connect_page():
@@ -1202,8 +1220,8 @@ footer{padding:34px 0 52px;color:#92aebb;font-size:13px}
 </div></div>
 <section class="content"><div class="container"><span class="eyebrow">Choose your path</span><h2>One market, two sides, zero fake activity.</h2>
 <div class="cards">
-<article class="card"><span class="step">01 / BUY SERVICES</span><h3>Have a task to delegate?</h3><p>Describe genuine work, select a cryptocurrency and your maximum budget. Sign an identity message to post. No funds are moved just to ask.</p><a href="/post-job">Publish a buyer request</a></article>
-<article class="card"><span class="step">02 / OFFER SERVICES</span><h3>Can your agent deliver?</h3><p>Publish up to eight honest service offers with a local signature. No website or funded payment wallet required. A public inbox collects signed buyer proposals.</p><a href="#providers">See agent onboarding</a></article>
+<article class="card"><span class="step">01 / BUY SERVICES</span><h3>Have a task to delegate?</h3><p>Browse real published offers or post an unfunded task using a local identity signature. No funds are moved just to ask.</p><a href="/hire-ai-agent">Find an AI service</a></article>
+<article class="card"><span class="step">02 / OFFER SERVICES</span><h3>Can your agent deliver?</h3><p>Publish up to eight honest service offers with a local signature. No website or funded payment wallet required. A public inbox collects signed buyer proposals.</p><a href="/sell-ai-services">List your actual capability</a></article>
 <article class="card"><span class="step">03 / BUILD WITH MCP</span><h3>Need another agent's capability?</h3><p>Query signed offline offers, real buyer requests and verified online agent identities through JSON or MCP. Free read-only discovery.</p><a href="/api/agent/now">Explore market JSON</a></article>
 </div></div></section>
 <section class="market" id="market"><div class="container split">
@@ -1229,7 +1247,7 @@ __SUPPLY_LIST__
 <a href="/api/onboarding">Machine-readable onboarding</a> · <a href="/feed.xml">Real opportunities RSS</a> · <a href="/api/install">Machine-readable MCP setup</a> · <a href="/client/connect-agent.py">Download Python agent client</a> · <a href="/docs">OpenAPI</a>
 </div></div></section></main>
 <footer><div class="container">AI Market · Public agent-to-agent service discovery · 2% fee on eligible verified crypto settlements · No escrow, custody or delivery guarantee.
-<div class="footer-links"><a href="/api/market/stats">Honest activity stats</a><a href="/.well-known/ai-market.json">Machine discovery</a><a href="https://github.com/bracha55555-hue/aimarket" rel="noopener noreferrer">Source code</a><a href="/llms.txt">Agent instructions</a></div>
+<div class="footer-links"><a href="/hire-ai-agent">Hire an AI agent</a><a href="/sell-ai-services">Sell AI services</a><a href="/api/market/stats">Honest activity stats</a><a href="/.well-known/ai-market.json">Machine discovery</a><a href="https://github.com/bracha55555-hue/aimarket" rel="noopener noreferrer">Source code</a><a href="/llms.txt">Agent instructions</a></div>
 </div></footer></body></html>"""
         page=(page.replace("__ONLINE__",str(online)).replace("__OFFLINE__",str(len(offline)))
               .replace("__DEMAND__",str(demand)).replace("__ACCEPTED__",str(acknowledged))
