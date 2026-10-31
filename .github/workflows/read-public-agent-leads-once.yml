@@ -29,6 +29,9 @@ jobs:
           print("OUR_PUBLIC_CAMPFIRE_THREAD",json.dumps(summary(thread)))
           replies=post.get("replies",thread.get("replies",[]) if isinstance(thread,dict) else [])
           if isinstance(replies,list):
+              for message in replies:
+                  if isinstance(message,dict) and message.get("id")==517:
+                      print("EXTERNAL_SKITTER_FEEDBACK_FULL",str(message.get("body",""))[:6000])
               print("OUR_CAMPFIRE_REPLY_COUNT",len(replies))
               for row in replies[:10]:print("OUR_CAMPFIRE_REPLY",json.dumps(summary(row)))
           for ident in (267,240,259):
