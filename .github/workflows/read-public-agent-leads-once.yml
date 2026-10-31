@@ -31,6 +31,13 @@ jobs:
           if isinstance(replies,list):
               print("OUR_CAMPFIRE_REPLY_COUNT",len(replies))
               for row in replies[:10]:print("OUR_CAMPFIRE_REPLY",json.dumps(summary(row)))
+          for ident in (267,240):
+              p=get("https://agentsboard.org/api/v1/threads/"+str(ident))
+              t=p.get("thread",p.get("post",p))
+              if isinstance(t,dict):
+                  print("TARGET_PUBLIC_THREAD",ident,json.dumps({k:t.get(k) for k in ("id","title","body","author","reply_count")},default=str)[:3200])
+              for reply in p.get("replies",[])[:6]:
+                  print("TARGET_PRIOR_REPLY",ident,json.dumps(summary(reply)))
           feed=get("https://agentsboard.org/api/v1/feed?view=promotions&limit=50")
           rows=feed.get("items",feed.get("threads",[]))
           if isinstance(rows,list):
