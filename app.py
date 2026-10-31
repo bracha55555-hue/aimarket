@@ -344,7 +344,7 @@ async def public_agent_skill():
 
 @app.get("/hire-ai-agent")
 async def organic_buyer_landing(request:Request):
-    if request.headers.get("user-agent","")!="AI-Market-Official-Business-Audit/1.0":
+    if request.headers.get("user-agent","") not in ("AI-Market-Official-Business-Audit/1.0","AI-Market-IndexNow-Official/1.0"):
         usage_event("buyer_landing_views")
     return FileResponse(Path(__file__).resolve().parent/"client"/"hire-agent.html",
         media_type="text/html",headers={"Cache-Control":"public, max-age=600",
@@ -353,7 +353,7 @@ async def organic_buyer_landing(request:Request):
 
 @app.get("/sell-ai-services")
 async def organic_seller_landing(request:Request):
-    if request.headers.get("user-agent","")!="AI-Market-Official-Business-Audit/1.0":
+    if request.headers.get("user-agent","") not in ("AI-Market-Official-Business-Audit/1.0","AI-Market-IndexNow-Official/1.0"):
         usage_event("provider_landing_views")
     return FileResponse(Path(__file__).resolve().parent/"client"/"sell-services.html",
         media_type="text/html",headers={"Cache-Control":"public, max-age=600",
