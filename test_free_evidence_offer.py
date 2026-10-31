@@ -66,8 +66,8 @@ class RealFirstIndependentProviderPilotTest(unittest.TestCase):
             self.assertEqual(prep.status_code,200,prep.text)
             data=prep.json()
             msg=data["sign_this_message_exactly"]
-            self.assertEqual(json.loads(msg.split("\n",1)[1])["scope"],SCOPE)
-            self.assertEqual(json.loads(msg.split("\n",1)[1])["evidence_url"],EVIDENCE)
+            self.assertEqual(json.loads(msg[len(cli.HEADER):])["scope"],SCOPE)
+            self.assertEqual(json.loads(msg[len(cli.HEADER):])["evidence_url"],EVIDENCE)
             sig=Account.sign_message(encode_defunct(text=msg),signer.key).signature.hex()
             bad=msg.replace(SCOPE,"Different deliverable")
             for m in (bad,msg.replace(EVIDENCE,"https://example.org/other")):
@@ -87,7 +87,7 @@ class RealFirstIndependentProviderPilotTest(unittest.TestCase):
             old={"agent_id":identity.address,"capability":"translation","currency":"BTC","price":0.01}
             prep=c.post("/api/signed-offers/prepare",json=old)
             self.assertEqual(prep.status_code,200,prep.text)
-            payload=json.loads(prep.json()["sign_this_message_exactly"].split("\n",1)[1])
+            payload=json.loads(prep.json()["sign_this_message_exactly"][len(cli.HEADER):])
             self.assertNotIn("scope",payload)
             self.assertNotIn("evidence_url",payload)
             self.assertEqual(c.post("/api/signed-offers/prepare",json={**old,"price":0}).status_code,422)
