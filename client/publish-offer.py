@@ -80,12 +80,12 @@ def load_or_create_identity(path):
         raise ValueError("Invalid local identity key file")
     return secret
 
-def validate_offer(capability, currency, price, contact_url=None):
+def validate_offer(capability, currency, price, contact_url=None, scope=None, evidence_url=None):
     if not isinstance(capability,str) or not CAP_PATTERN.fullmatch(capability.strip()):
         raise ValueError("Capability must be 1-48 safe characters")
     if currency not in VALID_CURRENCIES: raise ValueError("Unsupported quote currency")
-    if not isinstance(price,(float,int)) or isinstance(price,bool) or not math.isfinite(price) or not 0<price<=100000:
-        raise ValueError("Price must be positive and finite")
+    if not isinstance(price,(float,int)) or isinstance(price,bool) or not math.isfinite(price) or not 0<=price<=100000:
+        raise ValueError("Price must be nonnegative and finite")
     if contact_url is not None:
         from urllib.parse import urlsplit
         from ipaddress import ip_address
@@ -103,8 +103,19 @@ def validate_offer(capability, currency, price, contact_url=None):
                 raise ValueError("Invalid contact URL")
         except (ValueError,TypeError):
             raise ValueError("Custom contact must be a publicly reachable HTTPS domain") from None
+    if scope is not None:
+        if not isinstance(scope,str) or not 1<=len(scope.strip())<=160 or not all(32<=ord(c)<=126 for c in scope.strip()):
+            raise ValueError("Scope must be 1-160 printable ASCII characters")
+    if price==0 and not scope:
+        raise ValueError("Free pilot requires an actual delivery scope")
+    if evidence_url is not None:
+        if not isinstance(evidence_url,str) or len(evidence_url)>200 or not evidence_url.isascii() or any(ord(c)<33 or c=="\\\\" for c in evidence_url):
+            raise ValueError("Invalid evidence URL")
+        try: validate_offer(capability,currency,max(0.00000001,price),evidence_url)
+        except ValueError:
+            raise ValueError("Evidence link must be a public HTTPS domain") from None
 
-def validate_challenge(data, identity, capability, currency, price, contact_url, now=None):
+def validate_challenge(data, identity, capability, currency, price, contact_url, scope=None, evidence_url=None, now=None):
     """Fail closed on a response that could coerce signing altered terms."""
     now=int(time.time()) if now is None else int(now)
     if not isinstance(data,dict) or data.get("signature_scheme")!="EIP-191 personal_sign":
@@ -119,8 +130,11 @@ def validate_challenge(data, identity, capability, currency, price, contact_url,
     except (ValueError,UnicodeDecodeError): raise ValueError("Invalid signed terms") from None
     if not isinstance(payload,dict):
         raise ValueError("Invalid signed terms structure")
-    if set(payload)!={"agent_id","capability","currency","price","contact_url",
-                     "nonce","challenge_expires_at"}:
+    keys={"agent_id","capability","currency","price","contact_url",
+          "nonce","challenge_expires_at"}
+    if scope is not None:keys.add("scope")
+    if evidence_url is not None:keys.add("evidence_url")
+    if set(payload)!=keys:
         raise ValueError("Unapproved signed terms")
     expected_contact=contact_url or (BASE+"/api/purchase-intents?seller="+identity.lower())
     if (payload.get("agent_id")!=identity.lower() or
@@ -128,6 +142,8 @@ def validate_challenge(data, identity, capability, currency, price, contact_url,
         payload.get("currency")!=currency or
         type(payload.get("price")) not in (float,int) or payload.get("price")!=float(price) or
         payload.get("contact_url")!=expected_contact or
+        (scope is not None and payload.get("scope")!=scope.strip()) or
+        (evidence_url is not None and payload.get("evidence_url")!=evidence_url) or
         not isinstance(payload.get("nonce"),str) or
         not re.fullmatch(r"[0-9a-f]{32}",payload["nonce"]) or
         type(payload.get("challenge_expires_at")) is not int or
@@ -139,14 +155,16 @@ def validate_challenge(data, identity, capability, currency, price, contact_url,
         raise ValueError("Server unexpectedly requires a private key")
     return msg,proof
 
-def publish_offer(transport, key, capability, currency, price, contact_url=None):
+def publish_offer(transport, key, capability, currency, price, contact_url=None, scope=None, evidence_url=None):
     """One explicitly authorized publication. Never renews or pays automatically."""
-    validate_offer(capability,currency,price,contact_url)
+    validate_offer(capability,currency,price,contact_url,scope,evidence_url)
     account=Account.from_key(key)
     proposal={"agent_id":account.address,"capability":capability,"currency":currency,"price":float(price)}
     if contact_url: proposal["contact_url"]=contact_url
+    if scope: proposal["scope"]=scope.strip()
+    if evidence_url: proposal["evidence_url"]=evidence_url
     prepared=transport("/api/signed-offers/prepare",proposal)
-    message,proof=validate_challenge(prepared,account.address,capability,currency,price,contact_url)
+    message,proof=validate_challenge(prepared,account.address,capability,currency,price,contact_url,scope,evidence_url)
     signature=Account.sign_message(encode_defunct(text=message),key).signature.hex()
     result=transport("/api/signed-offers/publish",{
         "message":message,"challenge_proof":proof,"signature":signature})
@@ -157,10 +175,13 @@ def publish_offer(transport, key, capability, currency, price, contact_url=None)
     listing=result.get("listing")
     if not isinstance(listing,dict) or listing.get("agent_id")!=account.address.lower() or \
        listing.get("currency")!=currency or listing.get("capability")!=capability.strip().casefold() or \
-       listing.get("price")!=float(price):
+       listing.get("price")!=float(price) or
+       (scope is not None and listing.get("scope")!=scope.strip()) or
+       (evidence_url is not None and listing.get("evidence_url")!=evidence_url):
         raise RuntimeError("Server confirmed a different listing")
     return {"published":True,"agent_id":account.address,"capability":listing["capability"],
             "currency":currency,"price":listing["price"],
+            "scope":listing.get("scope"),"evidence_url":listing.get("evidence_url"),
             "seller_inbox":BASE+"/seller-inbox?seller="+account.address.lower(),
             "expires_at_unix":listing.get("expires_at_unix"),
             "notice":"Identity-signed offline advertisement, not verified capability, payment or availability."}
@@ -171,14 +192,16 @@ def main():
     parser.add_argument("--currency",choices=sorted(VALID_CURRENCIES),required=True)
     parser.add_argument("--price",type=float,required=True)
     parser.add_argument("--contact-url",default=None)
+    parser.add_argument("--scope",default=None,help="Precise actual service scope, required when --price 0")
+    parser.add_argument("--evidence-url",default=None,help="Optional public HTTPS sample; not independently verified")
     parser.add_argument("--publish",action="store_true",help="Explicitly authorize one identity-signed public listing. No payment.")
     args=parser.parse_args()
-    validate_offer(args.capability,args.currency,args.price,args.contact_url)
+    validate_offer(args.capability,args.currency,args.price,args.contact_url,args.scope,args.evidence_url)
     if not args.publish:
         print("DRY RUN: valid public quote; no key loaded and no network used. Add --publish to authorize one signed OFFLINE listing.")
         return
     key=load_or_create_identity(identity_file())
-    result=publish_offer(post_json,key,args.capability,args.currency,args.price,args.contact_url)
+    result=publish_offer(post_json,key,args.capability,args.currency,args.price,args.contact_url,args.scope,args.evidence_url)
     print(json.dumps(result,sort_keys=True))
 
 if __name__=="__main__":
