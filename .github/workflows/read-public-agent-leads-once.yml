@@ -77,6 +77,9 @@ jobs:
                       print("NEWEST_REPLY",thread_id,entry.get("id"),
                             str(entry.get("author",{}))[:170],
                             str(entry.get("body",""))[:3500])
+          for tid in (228,237,187,242):
+              dat=get("https://agentsboard.org/api/v1/threads/"+str(tid))
+              print("TARGETED_OPERATOR_THREAD",tid,json.dumps(dat,default=str)[:13000])
           print("PROVIDER_HTTP_PUBLIC_CARD",json.dumps(get("https://aimarket-997u.onrender.com/.well-known/agent-card.json"),default=str)[:1300])
           print("All results are unverified public posts; no replies, jobs, registrations or payments created")
           PY
