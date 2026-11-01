@@ -1901,11 +1901,12 @@ async def legacy_mcp_request(request, msg):
 @app.get("/.well-known/agent-card.json")
 @app.get("/.well-known/agent.json")
 async def honest_agent_discovery():
-    # Real A2A v1.0 JSON-RPC SendMessage; only synchronous read-only directory discovery.
+    # Read-only A2A 1.0 SendMessage and 0.3.0 message/send; no paid execution.
     base=PUBLIC_SERVER_URL.rstrip("/")
-    return {"name":"AI Market Discovery", "version":"1.6.0",
+    return {"name":"AI Market Discovery", "version":"1.6.1",
             "description":"Read-only directory of genuine identity-signed AI service listings and real unfunded buyer tasks. Empty results are normal; no service fulfillment or payment.",
-            "supportedInterfaces":[{"url":base+"/a2a","protocolBinding":"JSONRPC","protocolVersion":"1.0"}],
+            "supportedInterfaces":[{"url":base+"/a2a","protocolBinding":"JSONRPC","protocolVersion":"1.0"},
+                                   {"url":base+"/a2a","protocolBinding":"JSONRPC","protocolVersion":"0.3.0"}],
             "capabilities":{"streaming":False,"pushNotifications":False},
             "defaultInputModes":["text/plain"],"defaultOutputModes":["text/plain","application/json"],
             "documentationUrl":base+"/connect",
@@ -1921,13 +1922,13 @@ async def honest_agent_discovery():
 
 @app.post("/a2a")
 async def a2a_readonly_discovery(request:Request):
-    # JSON-RPC binding for A2A 1.0. No task execution, purchases, escrow, auto-posting or agent creation.
+    # Dual A2A JSON-RPC read-only discovery. No task execution, purchases or agent creation.
     def error(request_id,code,message,http_status=400):
         return JSONResponse({"jsonrpc":"2.0","id":request_id,
                              "error":{"code":code,"message":message}},status_code=http_status)
     version=request.headers.get("a2a-version")
-    if version is not None and version!="1.0":
-        return error(None,-32600,"Only A2A JSONRPC 1.0 is implemented")
+    if version is not None and version not in ("1.0","0.3.0"):
+        return error(None,-32600,"Only A2A JSONRPC 1.0 and 0.3.0 are implemented")
     raw=await request.body()
     if len(raw)>4096:
         return error(None,-32600,"A2A request too large",413)
@@ -1941,11 +1942,15 @@ async def a2a_readonly_discovery(request:Request):
         return error(None,-32600,"JSON-RPC request id required")
     if data.get("jsonrpc")!="2.0" or not isinstance(data.get("method"),str):
         return error(request_id,-32600,"Invalid JSON-RPC envelope")
-    if data["method"]!="SendMessage":
-        return error(request_id,-32601,"Read-only A2A only supports SendMessage")
+    if data["method"] not in ("SendMessage","message/send"):
+        return error(request_id,-32601,"Read-only A2A supports SendMessage or message/send")
+    legacy=data["method"]=="message/send"
+    if version is not None and version!=("0.3.0" if legacy else "1.0"):
+        return error(request_id,-32600,"A2A-Version and method disagree")
     params=data.get("params")
     message=params.get("message") if isinstance(params,dict) else None
-    if not isinstance(message,dict) or message.get("role")!="ROLE_USER" or "taskId" in message:
+    expected_role="user" if legacy else "ROLE_USER"
+    if not isinstance(message,dict) or message.get("role")!=expected_role or "taskId" in message:
         return error(request_id,-32602,"New user message without taskId required")
     if not isinstance(message.get("messageId"),str) or not 1<=len(message["messageId"])<=128:
         return error(request_id,-32602,"Valid messageId required")
@@ -1956,7 +1961,8 @@ async def a2a_readonly_discovery(request:Request):
     if not isinstance(parts,list) or len(parts)!=1 or not isinstance(parts[0],dict):
         return error(request_id,-32602,"Exactly one text part required")
     part=parts[0]
-    if set(part)!={"text"} or not isinstance(part["text"],str) or len(part["text"])>100:
+    expected_part={"kind","text"} if legacy else {"text"}
+    if set(part)!=expected_part or (legacy and part.get("kind")!="text") or not isinstance(part["text"],str) or len(part["text"])>100:
         return error(request_id,-32602,"Text command only (maximum 100 characters)")
     cmd=part["text"].strip().lower()
     if cmd in ("requests","buyers","jobs"):
@@ -1999,10 +2005,16 @@ async def a2a_readonly_discovery(request:Request):
     text_summary=("Read-only AI Market "+kind+": "+
                   str(payload.get("request_count",payload.get("offer_count",payload.get("buyer_request_count",0))))+
                   " matching entries/request count. No funded orders, escrow or service execution.")
-    response={"message":{"messageId":uuid.uuid4().hex,
-                          "contextId":context or uuid.uuid4().hex,
-                          "role":"ROLE_AGENT","parts":[{"text":text_summary},
-                          {"data":payload,"mediaType":"application/json"}]}}
+    reply_id=uuid.uuid4().hex
+    reply_context=context or uuid.uuid4().hex
+    if legacy:
+        response={"messageId":reply_id,"contextId":reply_context,"role":"agent",
+                  "parts":[{"kind":"text","text":text_summary},{"kind":"data","data":payload}],
+                  "kind":"message"}
+    else:
+        response={"message":{"messageId":reply_id,"contextId":reply_context,
+                             "role":"ROLE_AGENT","parts":[{"text":text_summary},
+                             {"data":payload,"mediaType":"application/json"}]}}
     return {"jsonrpc":"2.0","id":request_id,"result":response}
 
 @app.get("/.well-known/ai-catalog.json")
