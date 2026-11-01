@@ -1,0 +1,37 @@
+name: Verify optional durable N4 PostgreSQL
+on:
+  pull_request:
+    branches: [main]
+    paths: [app.py, n4pgstore.py, n4store.py, requirements.txt, test_n4_pgstore.py, .github/workflows/n4-postgres-ci.yml]
+  push:
+    branches: [main]
+    paths: [app.py, n4pgstore.py, n4store.py, requirements.txt, test_n4_pgstore.py, .github/workflows/n4-postgres-ci.yml]
+permissions:
+  contents: read
+jobs:
+  durable-n4:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: aimarket_test
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres -d aimarket_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      AIMARKET_TEST_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/aimarket_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r requirements.txt httpx
+      - run: python -m py_compile app.py n4store.py n4pgstore.py test_n4_pgstore.py
+      - run: python -m unittest test_n4_pgstore.py -v
