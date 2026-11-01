@@ -27,9 +27,9 @@ class ActualA2ADiscoveryTest(unittest.TestCase):
         response=self.client.get("/.well-known/agent-card.json")
         self.assertEqual(response.status_code,200,response.text)
         card=response.json()
-        self.assertEqual(card["supportedInterfaces"],[{
-            "url":m.PUBLIC_SERVER_URL.rstrip("/")+"/a2a",
-            "protocolBinding":"JSONRPC","protocolVersion":"1.0"}])
+        self.assertEqual(card["supportedInterfaces"],[
+            {"url":m.PUBLIC_SERVER_URL.rstrip("/")+"/a2a","protocolBinding":"JSONRPC","protocolVersion":"1.0"},
+            {"url":m.PUBLIC_SERVER_URL.rstrip("/")+"/a2a","protocolBinding":"JSONRPC","protocolVersion":"0.3.0"}])
         self.assertFalse(card["capabilities"]["streaming"])
         self.assertFalse(card["capabilities"]["pushNotifications"])
         self.assertEqual(card["defaultInputModes"],["text/plain"])
@@ -76,6 +76,34 @@ class ActualA2ADiscoveryTest(unittest.TestCase):
         self.assertEqual(other["offer_count"],0)
         self.assertEqual(len(m.purchase_intents),0)
         self.assertEqual(len(m.active_trades),0)
+
+    def test_independent_legacy_03_agent_compatibility_without_write_access(self):
+        body={"jsonrpc":"2.0","id":"probe-1","method":"message/send",
+              "params":{"message":{"messageId":"skitter-style-01","role":"user",
+                                   "parts":[{"kind":"text","text":"offers"}]}}}
+        response=self.client.post("/a2a",json=body,
+            headers={"User-Agent":"Independent-A2A-Client/0.3"})
+        self.assertEqual(response.status_code,200,response.text)
+        msg=response.json()["result"]
+        self.assertEqual(msg["kind"],"message")
+        self.assertEqual(msg["role"],"agent")
+        self.assertEqual(msg["parts"][0]["kind"],"text")
+        self.assertEqual(msg["parts"][1]["kind"],"data")
+        self.assertEqual(msg["parts"][1]["data"]["offer_count"],0)
+        self.assertFalse(msg["parts"][1]["data"]["escrow"])
+        for cmd in ("market","requests","offers:translation"):
+            body["params"]["message"]["parts"][0]["text"]=cmd
+            self.assertEqual(self.client.post("/a2a",json=body,
+                headers={"A2A-Version":"0.3.0"}).status_code,200)
+        body["params"]["message"]["parts"][0]["text"]="buy now"
+        self.assertEqual(self.client.post("/a2a",json=body).status_code,400)
+        body["params"]["message"]["parts"][0]["text"]="offers"
+        self.assertEqual(self.client.post("/a2a",json=body,
+            headers={"A2A-Version":"1.0"}).status_code,400)
+        body["method"]="SendMessage"
+        self.assertEqual(self.client.post("/a2a",json=body).status_code,400)
+        self.assertEqual(len(m.open_needs),0)
+        self.assertEqual(len(m.signed_offers),0)
 
     def test_fail_closed_on_payment_commands_and_unsupported_methods(self):
         for cmd in ("buy now","pay 0.5 ETH","publish job","send private key","offers:<script>"):
