@@ -10,6 +10,7 @@ from fastapi import FastAPI, WebSocket, Request
 from fastapi.responses import JSONResponse, Response, HTMLResponse, FileResponse
 from pathlib import Path
 from n4store import N4Store
+from n4pgstore import N4PostgresStore
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 from typing import Dict, Literal, Optional
@@ -75,10 +76,11 @@ def usage_event(kind):
         usage_events[kind] += 1
         logger.info("AIMARKET_USAGE type=%s count=%d",kind,usage_events[kind])
 
-# Storage is opt-in. A free Render instance has an ephemeral filesystem:
-# a local file survives process restarts but NOT a new host or redeployment.
+# Durable signed listings, buyer requests and nonbinding intents require external PostgreSQL.
+# Without the optional database URL, the legacy local N4 or ephemeral behavior is retained.
+_n4_db_url=os.getenv("AIMARKET_N4_DATABASE_URL")
 _n4_path=os.getenv("AIMARKET_N4_PATH")
-n4_store=N4Store(_n4_path) if _n4_path else None
+n4_store=N4PostgresStore(_n4_db_url) if _n4_db_url else (N4Store(_n4_path) if _n4_path else None)
 
 def signed_offer_key(data):
     return f"{data['agent_id'].lower()}:{data['capability'].strip().casefold()}:{data['currency']}"
