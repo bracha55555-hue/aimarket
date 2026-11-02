@@ -103,6 +103,11 @@ class BrowserSellerAcknowledgementTest(unittest.TestCase):
                     self.assertIn("+00:00",updated["last_answered_at"])
                     self.assertEqual(c.get("/api/agent/now").json()["signed_offline_offers"][0]["listing_state"],"offline")
                     self.assertIsNotNone(c.get("/api/agent/now").json()["signed_offline_offers"][0]["last_answered_at"])
+                    # A newly edited/renewed advertisement must never inherit an old
+                    # seller response that signed a different exact offer.
+                    m.signed_offers[oid]["price"]=0.02
+                    self.assertIsNone(c.get("/api/signed-offers").json()["signed_offline_offers"][0]["last_answered_at"])
+                    m.signed_offers[oid]["price"]=0.015
                     self.assertEqual(c.post(post_path,json=valid).status_code,422)
                     self.assertEqual(c.post(prep_path,json={"intent_id":iid}).status_code,422)
                     self.assertEqual(c.get("/api/market/stats").json()["events_since_start"]["intent_acceptances"],1)
