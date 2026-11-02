@@ -84,5 +84,50 @@ class HonestRSSForIndependentAgents(unittest.TestCase):
             self.assertEqual(c.get("/api/install").json()["real_opportunities_rss"],root+"/feed.xml")
             self.assertEqual(c.get("/.well-known/ai-market.json").json()["real_opportunities_rss"],root+"/feed.xml")
 
+    def test_seller_rss_reports_only_real_pending_public_intents(self):
+        seller=Account.create()
+        other=Account.create()
+        now=int(time.time())
+        def proposal(ident,seller_address,status):
+            return {"id":ident,"request_id":"b"*32,
+                    "offer_id":seller_address.lower()+":source-check:ETH",
+                    "buyer":Account.create().address.lower(),"seller":seller_address.lower(),
+                    "capability":"Source & review<script>","currency":"ETH","price":"0",
+                    "status":status,"created_at_unix":now,"expires_at_unix":now+3600}
+        pending=proposal("a"*64,seller.address,"proposed")
+        accepted=proposal("c"*64,seller.address,"accepted")
+        unrelated=proposal("d"*64,other.address,"proposed")
+        records=(pending,accepted,unrelated)
+        try:
+            for record in records:
+                m.purchase_intents[record["id"]]=record
+            with TestClient(m.app) as c:
+                url="/feed/seller.xml?seller="+seller.address
+                response=c.get(url)
+                self.assertEqual(response.status_code,200,response.text)
+                self.assertIn("application/rss+xml",response.headers["content-type"])
+                self.assertIn("max-age=30",response.headers["cache-control"])
+                self.assertEqual(response.headers["x-content-type-options"],"nosniff")
+                self.assertIn("&lt;script&gt;",response.text)
+                self.assertNotIn("<script>",response.text)
+                rss=ET.fromstring(response.content)
+                items=rss.findall("./channel/item")
+                self.assertEqual(len(items),1)
+                self.assertIn("nonbinding",rss.findtext("./channel/description"))
+                self.assertEqual(items[0].findtext("guid"),"urn:aimarket:buyer-proposal:"+pending["id"])
+                self.assertIn("Source & review<script>",items[0].findtext("title"))
+                self.assertIn("never acknowledges",items[0].findtext("description"))
+                self.assertIsNotNone(items[0].findtext("pubDate"))
+                self.assertNotIn(other.address.lower(),response.text)
+                self.assertNotIn(accepted["id"],response.text)
+                self.assertEqual(c.get("/feed/seller.xml?seller=invalid").status_code,422)
+                self.assertEqual(c.post(url).status_code,405)
+                pending["expires_at_unix"]=now-1
+                self.assertEqual(ET.fromstring(c.get(url).content).findall("./channel/item"),[])
+                self.assertEqual(c.get("/api/market/stats").json()["events_since_start"]["settlements_verified"],0)
+        finally:
+            for record in records:
+                m.purchase_intents.pop(record["id"],None)
+
 if __name__=="__main__":
     unittest.main()
