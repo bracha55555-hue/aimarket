@@ -1,4 +1,4 @@
-name: One-time truthful AI Market public agent-directory distribution
+name: One-time AgentBazaar A2A registration after MCP-only HTTP 400
 on:
   push:
     branches: [main]
@@ -7,91 +7,68 @@ on:
 permissions:
   contents: read
 jobs:
-  publish:
+  register:
     runs-on: ubuntu-latest
-    timeout-minutes: 9
+    timeout-minutes: 8
     steps:
-      - name: Verify exact live revision before one noncommercial listing per directory
+      - name: Try one documented A2A card registration only after exact live revision verification
         env:
           EXPECTED_SHA: ${{ github.sha }}
         run: |
           python3 - <<'PY'
-          import json,os,time,urllib.error,urllib.parse,urllib.request
+          import json,os,re,time,urllib.error,urllib.request
           ROOT="https://aimarket-997u.onrender.com"
-          MCP=ROOT+"/mcp"
           CARD=ROOT+"/.well-known/agent-card.json"
-          UA="AI-Market-Operator-Directory-Publication/1.0 (+https://github.com/bracha55555-hue/aimarket)"
-          HEADERS={"User-Agent":UA,"Accept":"application/json"}
-          def get(url,timeout=22):
-              request=urllib.request.Request(url,headers=HEADERS,method="GET")
-              with urllib.request.urlopen(request,timeout=timeout) as response:
-                  return response.status,json.loads(response.read(600000).decode("utf-8"))
-          def post(url,payload,timeout=26):
-              encoded=json.dumps(payload,sort_keys=True,separators=(",",":"),allow_nan=False).encode()
-              request=urllib.request.Request(url,data=encoded,method="POST",
-                  headers={**HEADERS,"Content-Type":"application/json"})
-              try:
-                  with urllib.request.urlopen(request,timeout=timeout) as response:
-                      # Some directories return owner API keys. Never log, reuse, or expose them.
-                      return response.status
-              except urllib.error.HTTPError as error:
-                  return error.code
-          assert os.environ["EXPECTED_SHA"] and len(os.environ["EXPECTED_SHA"])==40
+          HEADERS={"User-Agent":"AI-Market-Operator-A2A-Directory/1.0 (+https://github.com/bracha55555-hue/aimarket)",
+                   "Accept":"application/json"}
+          def get(url):
+              with urllib.request.urlopen(urllib.request.Request(url,headers=HEADERS),timeout=25) as response:
+                  return json.loads(response.read(500000).decode())
           for attempt in range(31):
               try:
-                  status,health=get(ROOT+"/health")
-                  if status!=200 or health.get("deployed_git_sha")!=os.environ["EXPECTED_SHA"]:
-                      raise ValueError("production SHA not current")
-                  _,card=get(CARD)
-                  interfaces=card.get("supportedInterfaces") or []
-                  versions={i.get("protocolVersion") for i in interfaces
-                            if isinstance(i,dict) and i.get("url")==ROOT+"/a2a"
-                            and i.get("protocolBinding")=="JSONRPC"}
-                  if not {"1.0","0.3.0"}.issubset(versions) or card.get("capabilities",{}).get("streaming") is not False:
-                      raise ValueError("actual A2A discovery capabilities not verified")
-                  _,install=get(ROOT+"/api/install")
-                  if install.get("read_only_mcp_url")!=MCP or install.get("no_api_key_required_for_read_only") is not True:
-                      raise ValueError("MCP free discovery not verified")
-                  print("PRODUCTION_RELEASE_CONFIRMED",health["deployed_git_sha"])
+                  health=get(ROOT+"/health")
+                  if health.get("deployed_git_sha")!=os.environ["EXPECTED_SHA"]:
+                      raise ValueError("production revision mismatch")
+                  card=get(CARD)
+                  versions={x.get("protocolVersion") for x in card.get("supportedInterfaces",[])
+                            if isinstance(x,dict) and x.get("protocolBinding")=="JSONRPC" and
+                            x.get("url")==ROOT+"/a2a"}
+                  if not {"1.0","0.3.0"}.issubset(versions):
+                      raise ValueError("A2A not independently verified")
+                  if card.get("capabilities",{}).get("streaming") is not False:
+                      raise ValueError("card must honestly declare no streaming")
+                  print("A2A_LIVE_CARD_CONFIRMED",os.environ["EXPECTED_SHA"])
                   break
-              except (urllib.error.URLError,ValueError,TimeoutError,KeyError,AssertionError) as exc:
-                  print("WAIT_FOR_LIVE_RELEASE",attempt+1,type(exc).__name__)
-              if attempt==30:
-                  raise RuntimeError("No external submission: exact main release never verified")
+              except (urllib.error.URLError,ValueError,TimeoutError,KeyError) as exc:
+                  print("WAITING_FOR_EXACT_LIVE_CARD",attempt+1,type(exc).__name__)
+              if attempt==30:raise RuntimeError("No external registration: live revision not verified")
               time.sleep(8)
-          successes=[]
-          # Source: https://agentservicedirectory.com/submit (POST /api/v1/submissions).
-          # The directory independently checks public MCP endpoints. One submission only.
+          catalog=get("https://agentbazaar.tech/explore/agents.json")
+          if not isinstance(catalog.get("agents"),list):
+              raise RuntimeError("Directory catalog unknown: no external POST")
+          if any(isinstance(a,dict) and
+              (ROOT in str(a.get("card_url","")) or ROOT in str(a.get("call","")))
+              for a in catalog["agents"]):
+              print("AGENTBAZAAR_ALREADY_INDEXED; NO POST")
+              raise SystemExit(0)
+          # Last attempt supplied MCP only and returned HTTP 400. This one supplies
+          # their explicitly documented A2A agent_card_url instead, exactly once.
+          body=json.dumps({"agent_card_url":CARD}).encode()
+          req=urllib.request.Request("https://agentbazaar.tech/v1/sell",data=body,method="POST",
+              headers={**HEADERS,"Content-Type":"application/json"})
           try:
-              code=post("https://agentservicedirectory.com/api/v1/submissions",
-                        {"url":MCP})
-              print("AGENT_SERVICE_DIRECTORY_SUBMISSION_HTTP",code)
-              if code in (200,201,202,409):
-                  successes.append("agent-service-directory")
-          except (urllib.error.URLError,TimeoutError,ValueError) as exc:
-              print("AGENT_SERVICE_DIRECTORY_UNAVAILABLE",type(exc).__name__)
-          # Source: https://agentbazaar.tech/explore. It accepts a remote MCP URL
-          # as a free callable discovery agent, not a paid seller or x402 service.
-          # Check its machine-readable live agents first; do not create duplicates.
-          try:
-              code,manifest=get("https://agentbazaar.tech/explore/agents.json",timeout=35)
-              if code!=200 or not isinstance(manifest.get("agents"),list):
-                  raise ValueError("cannot verify existing agent entries")
-              agents=manifest["agents"]
-              if any(isinstance(x,dict) and (ROOT in str(x.get("card_url",""))
-                     or ROOT in str(x.get("call",""))) for x in agents):
-                  print("AGENTBAZAAR_ALREADY_LISTED")
-                  successes.append("agentbazaar")
-              else:
-                  code=post("https://agentbazaar.tech/v1/sell",{"mcp_server_url":MCP})
-                  print("AGENTBAZAAR_REGISTRATION_HTTP",code)
-                  if code in (200,201,202,409):
-                      successes.append("agentbazaar")
-          except (urllib.error.URLError,TimeoutError,ValueError) as exc:
-              print("AGENTBAZAAR_UNAVAILABLE_OR_UNVERIFIED",type(exc).__name__)
-          print("SUCCESSFUL_DIRECTORY_RESPONSES",",".join(successes))
-          print("External acceptance is NOT public indexing, an outside agent, buyer, sale or settlement.")
-          print("No API keys, identities, funds, wallets, seller offers or buyer jobs were submitted.")
-          if len(successes)!=2:
-              raise RuntimeError("At least one public directory did not confirm a submission; no automatic retries")
+              with urllib.request.urlopen(req,timeout=40) as response:
+                  code=response.status
+                  # Do not log response bodies or headers; provider may issue an API key.
+          except urllib.error.HTTPError as exc:
+              code=exc.code
+              raw=exc.read(700).decode("utf-8","replace")
+              raw=re.sub(r"(?i)(?:api[_-]?key|token|secret|authorization)[^,}\n]{0,100}","[redacted]",raw)
+              raw=re.sub(r"(?:0x)?[0-9a-fA-F]{40,}","[redacted]",raw)
+              print("AGENTBAZAAR_REJECTION_SUMMARY",raw[:220])
+          print("AGENTBAZAAR_A2A_REGISTRATION_HTTP",code)
+          if code not in (200,201,202,409):
+              raise RuntimeError("Not accepted; no repeated submissions")
+          print("AgentBazaar accepted a registration request or detected duplicate. Public indexing requires read-back.")
+          print("No access tokens, funds, private keys, fake offers or real customer activity were posted.")
           PY

@@ -92,8 +92,35 @@ def signed_record_storage_status():
     return {"mode":"process_memory","survives_app_redeploy":False,
             "scope":"all listing records vanish on restart; not a durable order ledger"}
 
+def signed_record_persistence_note():
+    if isinstance(n4_store,N4PostgresStore):
+        return "External PostgreSQL preserves unexpired signed records across app redeploy while its database remains available; not a durable trade or settlement ledger"
+    if n4_store is not None:
+        return "Optional local N4 may survive process restart but host replacement can erase signed records"
+    return "Process-local listings; restart clears all signed records"
+
 def signed_offer_key(data):
     return f"{data['agent_id'].lower()}:{data['capability'].strip().casefold()}:{data['currency']}"
+
+def observed_offline_offer(offer,now=None):
+    """Public observed state; a signed offline ad does not prove current service readiness."""
+    now=int(time.time()) if now is None else int(now)
+    row=dict(offer)
+    row["listing_state"]="offline"
+    row["checked_at"]=datetime.fromtimestamp(now,timezone.utc).isoformat()
+    row["checked_at_unix"]=now
+    oid=row.get("offer_id",signed_offer_key(row))
+    offer_hash=intent_digest(row,("agent_id","capability","currency","price",
+        "contact_url","expires_at_unix")+tuple(k for k in ("scope","evidence_url") if k in row))
+    acknowledgements=[i.get("seller_responded_at_unix") for i in purchase_intents.values()
+                      if i.get("offer_id")==oid and i.get("seller")==row["agent_id"]
+                      and i.get("seller_terms_hash")==offer_hash
+                      and i.get("status")=="accepted"
+                      and type(i.get("seller_responded_at_unix")) is int]
+    last=max(acknowledgements) if acknowledgements else None
+    row["last_answered_at"]=datetime.fromtimestamp(last,timezone.utc).isoformat() if last else None
+    row["last_answered_at_unix"]=last
+    return row
 
 def restore_n4_records():
     if n4_store is None: return
@@ -574,8 +601,11 @@ async def agent_fast_start(capability: Optional[str] = None, currency: Optional[
     async with state_lock:
         expire_stale_trades()
         sellers=[{"agent_id":ident,"capabilities":p["capabilities"],"pricing":p["pricing"],
-                  "identity_verified":True} for ident,p in agent_profiles.items()
-                 if p.get("identity_verified") and (not q or any(q in c.casefold() for c in p["capabilities"]))]
+                  "identity_verified":True,"listing_state":"live",
+                  "checked_at":datetime.now(timezone.utc).isoformat(),
+                  "availability_confirmed":False} for ident,p in agent_profiles.items()
+                 if ident in active_agents and p.get("identity_verified")
+                 and (not q or any(q in c.casefold() for c in p["capabilities"]))]
         needs=[public_need(n) for n in open_needs.values()
                if (not q or q in n["capability"].casefold()) and
                   (currency is None or n["currency"]==currency)]
@@ -584,7 +614,10 @@ async def agent_fast_start(capability: Optional[str] = None, currency: Optional[
                   "currency":o["currency"],"price":o["price"],
                   "contact_url":o["contact_url"],"expires_at_unix":o["expires_at_unix"],
                   "identity_verified":True,"seller_online":False,
-                  "contact_url_verified":False,"availability_confirmed":False}
+                  "contact_url_verified":False,"availability_confirmed":False,
+                  "listing_state":"offline",
+                  "checked_at":datetime.now(timezone.utc).isoformat(),
+                  "last_answered_at":observed_offline_offer(o)["last_answered_at"]}
                  for o in signed_offers.values()
                  if (not q or q in o["capability"]) and
                     (currency is None or o["currency"]==currency) and
@@ -605,7 +638,7 @@ async def agent_fast_start(capability: Optional[str] = None, currency: Optional[
             "identity":"The client can create a local identity-only key; no funded wallet required for discovery",
             "notice":"Offline offers verify signing identity only, not skill, contact ownership or availability. Buyer requests are unfunded. No escrow or guaranteed customers.",
             "settlement":{"fees_rate":0.02,"network_fees_extra":True,"payment_verified":False,"escrow":False},
-            "persistence":signed_record_storage_status(),
+            "persistence":signed_record_persistence_note(),"signed_record_storage":signed_record_storage_status(),
             "currencies":list(FEE_WALLETS)}
 
 FLIGHT_EXAMPLE = "translation,code-review"
@@ -1521,11 +1554,11 @@ async def handle_offer_tool(name, args):
                 n4_store.put("offer",key,record,record["capability"],record["currency"],record["expires_at_unix"])
             signed_offers[key]=record
             used_offer_proofs[proof]=payload["challenge_expires_at"]
-            row=dict(record)
+            row=observed_offline_offer(record)
         usage_event("signed_offers_published")
         return {"published":True,"listing":row,"expires_in_seconds":OFFER_TTL_SECONDS,
                 "online":False,"can_accept_marketplace_orders":False,"contact_url_verified":False,
-                "identity_verified":True,"funded":False,"persistence":("Optional local N4 storage; host replacement may lose it" if n4_store else "Process-local; restart clears listing"),
+                "identity_verified":True,"funded":False,"persistence":signed_record_persistence_note(),"signed_record_storage":signed_record_storage_status(),
                 "note":"This listing verifies control of an identity key, not capability, URL ownership or service delivery. Buyers must independently validate."}
     if name=="browse_signed_offers":
         if set(args)-{"capability"}: raise ValueError("invalid filters")
@@ -1534,11 +1567,12 @@ async def handle_offer_tool(name, args):
             raise ValueError("invalid capability")
         async with state_lock:
             expire_stale_trades()
-            rows=[dict(o) for o in signed_offers.values() if not cap or cap.casefold() in o["capability"]]
+            rows=[observed_offline_offer(o) for o in signed_offers.values()
+                  if not cap or cap.casefold() in o["capability"]]
         return {"signed_offline_offers":rows[:MAX_AGENTS],"count":len(rows),
                 "available_now":False,"identity_only":True,"contact_urls_unverified":True,
-                "persistence":("Optional local N4 storage; not durable across Render host replacement" if n4_store else "Process-local; expires after 72h or restart"),
-                "notice":"Not online providers; browse/consult seller contact directly, do not send payment based on this directory."}
+                "persistence":signed_record_persistence_note(),"signed_record_storage":signed_record_storage_status(),
+                "notice":"Only currently unexpired offline ads are returned. An absent offer may have expired, been removed, or been lost at restart; absence cannot distinguish those cases. last_answered_at proves only a recorded seller-signed nonbinding acknowledgement, not liveness, capability, delivery or settlement."}
     raise ValueError("unsupported offer tool")
 
 
@@ -1688,7 +1722,9 @@ def validate_intent_signature(role,args):
 
 def public_purchase_intent(item):
     keys=("id","request_id","offer_id","buyer","seller","capability","currency","price","status","created_at_unix","expires_at_unix")
-    return {k:item[k] for k in keys}
+    row={k:item[k] for k in keys}
+    row["seller_responded_at_unix"]=item.get("seller_responded_at_unix") if item["status"]=="accepted" else None
+    return row
 
 async def handle_purchase_intent(name,args):
     if name=="prepare_purchase_intent":
@@ -1776,7 +1812,7 @@ async def handle_purchase_intent(name,args):
                 or fields["buyer_message_hash"]!=hashlib.sha256(item["buyer_message"].encode()).hexdigest()):
                 raise ValueError("seller identity or signed terms mismatch")
             if proof in used_intent_proofs: raise ValueError("replayed acceptance")
-            record={**item,"status":"accepted","seller_message":args["message"],"seller_signature":args["signature"]}
+            record={**item,"status":"accepted","seller_message":args["message"],"seller_signature":args["signature"],"seller_responded_at_unix":int(time.time())}
             if n4_store is not None: n4_store.put("intent",item["id"],record,item["seller"],item["currency"],record["expires_at_unix"])
             purchase_intents[item["id"]]=record
             used_intent_proofs[proof]=fields["challenge_expires_at"]

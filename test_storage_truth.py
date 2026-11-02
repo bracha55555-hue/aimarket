@@ -15,7 +15,8 @@ class HonestDurabilityStatusTest(unittest.TestCase):
             discovery=asyncio.run(market.agent_fast_start())
             self.assertEqual(health["signed_record_storage"],value)
             self.assertEqual(stats["signed_record_storage"],value)
-            self.assertEqual(discovery["persistence"],value)
+            self.assertEqual(discovery["signed_record_storage"],value)
+            self.assertIn("restart",discovery["persistence"])
             self.assertFalse(health["durable_trades"])
             self.assertFalse(health["escrow"])
 

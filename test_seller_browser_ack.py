@@ -64,6 +64,12 @@ class BrowserSellerAcknowledgementTest(unittest.TestCase):
                     self.assertEqual(inbox.json()["count"],1)
                     self.assertEqual(inbox.json()["intents"][0]["id"],iid)
                     self.assertEqual(inbox.json()["intents"][0]["status"],"proposed")
+                    self.assertIsNone(inbox.json()["intents"][0]["seller_responded_at_unix"])
+                    early=c.get("/api/signed-offers").json()["signed_offline_offers"][0]
+                    self.assertEqual(early["listing_state"],"offline")
+                    self.assertIsInstance(early["checked_at_unix"],int)
+                    self.assertIsNone(early["last_answered_at"])
+                    self.assertFalse(c.get("/api/agent/now").json()["signed_offline_offers"][0]["seller_online"])
                     prep_path="/api/purchase-intents/accept/prepare"
                     post_path="/api/purchase-intents/accept/publish"
                     self.assertEqual(c.post(prep_path,json={"intent_id":"not-valid"}).status_code,422)
@@ -91,6 +97,17 @@ class BrowserSellerAcknowledgementTest(unittest.TestCase):
                     self.assertFalse(data["escrow"])
                     self.assertEqual(data["intent"]["id"],iid)
                     self.assertEqual(data["intent"]["status"],"accepted")
+                    self.assertIsInstance(data["intent"]["seller_responded_at_unix"],int)
+                    updated=c.get("/api/signed-offers").json()["signed_offline_offers"][0]
+                    self.assertEqual(updated["last_answered_at_unix"],data["intent"]["seller_responded_at_unix"])
+                    self.assertIn("+00:00",updated["last_answered_at"])
+                    self.assertEqual(c.get("/api/agent/now").json()["signed_offline_offers"][0]["listing_state"],"offline")
+                    self.assertIsNotNone(c.get("/api/agent/now").json()["signed_offline_offers"][0]["last_answered_at"])
+                    # A newly edited/renewed advertisement must never inherit an old
+                    # seller response that signed a different exact offer.
+                    m.signed_offers[oid]["price"]=0.02
+                    self.assertIsNone(c.get("/api/signed-offers").json()["signed_offline_offers"][0]["last_answered_at"])
+                    m.signed_offers[oid]["price"]=0.015
                     self.assertEqual(c.post(post_path,json=valid).status_code,422)
                     self.assertEqual(c.post(prep_path,json={"intent_id":iid}).status_code,422)
                     self.assertEqual(c.get("/api/market/stats").json()["events_since_start"]["intent_acceptances"],1)
