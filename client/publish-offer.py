@@ -183,6 +183,7 @@ def publish_offer(transport, key, capability, currency, price, contact_url=None,
             "currency":currency,"price":listing["price"],
             "scope":listing.get("scope"),"evidence_url":listing.get("evidence_url"),
             "seller_inbox":BASE+"/seller-inbox?seller="+account.address.lower(),
+            "seller_proposals_rss":BASE+"/feed/seller.xml?seller="+account.address.lower(),
             "expires_at_unix":listing.get("expires_at_unix"),
             "notice":"Identity-signed offline advertisement, not verified capability, payment or availability."}
 
