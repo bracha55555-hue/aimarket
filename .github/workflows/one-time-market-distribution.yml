@@ -64,7 +64,7 @@ jobs:
           # The directory independently checks public MCP endpoints. One submission only.
           try:
               code=post("https://agentservicedirectory.com/api/v1/submissions",
-                        {"url":MCP,"kind":"mcp"})
+                        {"url":MCP})
               print("AGENT_SERVICE_DIRECTORY_SUBMISSION_HTTP",code)
               if code in (200,201,202,409):
                   successes.append("agent-service-directory")
