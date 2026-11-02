@@ -21,12 +21,16 @@ class BrowserSellerAcknowledgementTest(unittest.TestCase):
                 self.assertIn("script-src 'self'",page.headers["content-security-policy"])
                 self.assertNotIn("unsafe-inline",page.headers["content-security-policy"].split("script-src")[1].split(";")[0])
                 self.assertIn("No purchase or payment",page.text)
+                self.assertIn('id="rss-feed"',page.text)
+                self.assertIn("signed buyer proposals (RSS)",page.text)
                 js=c.get("/client/seller-inbox.js")
                 self.assertEqual(js.status_code,200)
                 self.assertIn('personal_sign',js.text)
                 self.assertIn('eth_requestAccounts',js.text)
                 self.assertIn('textContent',js.text)
                 self.assertIn("window.confirm",js.text)
+                self.assertIn("updateRssLink",js.text)
+                self.assertIn("/feed/seller.xml?seller=",js.text)
                 for forbidden in ("eth_sendTransaction","send_raw_transaction","wallet_sendTransaction","privateKey","innerHTML"):
                     self.assertNotIn(forbidden,js.text)
                 provider_js=c.get("/client/provider-studio.js").text

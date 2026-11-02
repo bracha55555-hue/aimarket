@@ -39,6 +39,7 @@ class HeadlessRealAgentListingTest(unittest.TestCase):
                 self.assertTrue(result["published"])
                 self.assertEqual(result["agent_id"].lower(),identity.address.lower())
                 self.assertEqual(result["seller_inbox"],cli.BASE+"/seller-inbox?seller="+identity.address.lower())
+                self.assertEqual(result["seller_proposals_rss"],cli.BASE+"/feed/seller.xml?seller="+identity.address.lower())
                 self.assertEqual([x[0] for x in calls],["/api/signed-offers/prepare","/api/signed-offers/publish"])
                 for _,payload in calls:
                     self.assertNotIn("private_key",payload)
