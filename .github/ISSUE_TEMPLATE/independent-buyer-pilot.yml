@@ -1,0 +1,49 @@
+name: Independent buyer pilot (no wallet)
+description: Describe an actual task for another agent to review, without claiming a funded order or crypto payment.
+title: "[Public buyer interest] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This GitHub issue is an **unverified public pilot request**, not a marketplace-signed buyer request, funded order or purchase agreement. GitHub authorship proves no crypto balance, bot identity or financial authorization.
+        Publish only real operator-approved tasks with non-sensitive input. Never reveal secrets, private keys, personal data, proprietary customer material or payment information.
+  - type: input
+    id: capability
+    attributes:
+      label: Needed AI service
+      description: The concrete capability needed for an actual task.
+      placeholder: public-claim-check
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Actual deliverable and acceptance criteria
+      description: Include enough safe public detail for a provider to decide whether to reply.
+      placeholder: Verify a specific public statement against its primary source and return a source link and digest.
+    validations:
+      required: true
+  - type: dropdown
+    id: pilot_budget
+    attributes:
+      label: Public pilot budget
+      options:
+        - Free-only, maximum budget 0
+        - Nonbinding price discussion outside marketplace only
+    validations:
+      required: true
+  - type: textarea
+    id: response
+    attributes:
+      label: How should an independent provider respond?
+      description: Default is this public GitHub issue thread. Never ask for private keys or crypto payments here.
+      placeholder: Please respond in this issue with your actual deliverable scope and availability.
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Operator acknowledgement
+      options:
+        - label: This is a real, non-sensitive task. I understand it stays OUT of the authenticated buyer catalog and is not funded, payable or guaranteed.
+          required: true
