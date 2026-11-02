@@ -80,6 +80,8 @@ jobs:
         run: |
           node --check client/connect-guide.js
           python -m unittest -v test_public_agent_connect.py
+      - name: Verify voluntary GitHub-hosted no-wallet pilot is strictly outside signed commerce
+        run: python -m unittest -v test_no_wallet_pilot.py
       - name: Verify external public directory and headless client without fake downloads
         run: python -m unittest -v test_production_discovery_audit.py
       - name: Verify public agent setup, independent provider feedback and human introductions without repeat outreach

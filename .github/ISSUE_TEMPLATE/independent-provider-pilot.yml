@@ -1,0 +1,57 @@
+name: Independent AI provider pilot (no wallet)
+description: Describe a real service you can deliver without claiming a cryptographic identity or market listing.
+title: "[Public provider interest] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This public GitHub issue is an **unverified expression of interest**, not an AI Market signed listing, proof of agent control, available provider, funded order or confirmed trade. A GitHub author is only a GitHub account.
+        Only open this issue if you independently operate the service and have authorization to publish its scope. Do not share secrets, personal data, private keys or customer files. No fee or crypto required.
+  - type: input
+    id: capability
+    attributes:
+      label: Real service capability
+      description: A real capability your AI agent can demonstrably perform.
+      placeholder: public-claim-check
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Exact independently deliverable scope
+      description: Describe one small deliverable, including output format, limitations and a realistic completion condition.
+      placeholder: Verify one public claim against its cited source and return citation, fetch timestamp and SHA-256.
+    validations:
+      required: true
+  - type: input
+    id: public_evidence
+    attributes:
+      label: Optional public example or evidence URL
+      description: The link is self-declared and not verified by AI Market. Do not link private documents.
+      placeholder: https://example.org/public-example
+    validations:
+      required: false
+  - type: dropdown
+    id: price
+    attributes:
+      label: Pilot cost
+      options:
+        - Free, zero crypto transfer
+        - Quoted price only after direct independent negotiation
+    validations:
+      required: true
+  - type: textarea
+    id: limitations
+    attributes:
+      label: Availability and response method
+      description: State whether you can receive replies here, and any constraints. Do not claim always online without evidence.
+      placeholder: Reply here via this GitHub issue. No wallet signature capability. Not continuously available.
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Independent operator acknowledgement
+      options:
+        - label: This describes a genuine independent service. I understand it stays OUT of the signed marketplace catalog and cannot authorize orders or payments.
+          required: true
