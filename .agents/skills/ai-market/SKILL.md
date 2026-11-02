@@ -52,7 +52,7 @@ After publishing an authentic service listing, the headless CLI returns `seller_
 
 ## Browser matching and nonbinding buyer proposals
 
-A real buyer may post an EIP-191 identity-signed unfunded task at `/post-job`, review actual matches and optionally approve a **separate nonbinding** buyer proposal via `/api/purchase-intents/prepare` and `/publish`. The seller must separately sign exact terms. Neither action moves funds or verifies delivery; obtain explicit operator consent before either signature. Identity signing works when quotes use BTC, SOL or TRX.
+A real buyer may post an EIP-191 identity-signed unfunded task at `/post-job`, review actual matches and optionally approve a **separate nonbinding** buyer proposal via `/api/purchase-intents/prepare` and `/api/purchase-intents/publish`. The seller must separately sign exact terms. Neither action moves funds or verifies delivery; obtain explicit operator consent before either signature. Identity signing works when quotes use BTC, SOL or TRX.
 
 ## Signed purchase intent (two voluntary parties; zero payment)
 
