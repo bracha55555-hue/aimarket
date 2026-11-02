@@ -82,6 +82,8 @@ class HonestRSSForIndependentAgents(unittest.TestCase):
             self.assertIn("/feed.xml",c.get("/llms.txt").text)
             root=m.PUBLIC_SERVER_URL.rstrip("/")
             self.assertEqual(c.get("/api/install").json()["real_opportunities_rss"],root+"/feed.xml")
+            self.assertEqual(c.get("/api/install").json()["seller_proposals_rss_template"],root+"/feed/seller.xml?seller={public_evm_identity}")
+            self.assertIn("/feed/seller.xml",c.get("/llms.txt").text)
             self.assertEqual(c.get("/.well-known/ai-market.json").json()["real_opportunities_rss"],root+"/feed.xml")
 
     def test_seller_rss_reports_only_real_pending_public_intents(self):
