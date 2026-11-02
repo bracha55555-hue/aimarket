@@ -254,6 +254,10 @@ AI Market supports both MCP protocol eras at the **same** HTTPS endpoint: modern
 
 **Registry listing manifest:** [server.json](./server.json) uses the GitHub-owned namespace `io.github.bracha55555-hue/aimarket`. CI validates the manifest and a real remote MCP handshake; publishing is done through scoped GitHub OIDC without stored access tokens. Publication to the official registry was confirmed by GitHub Actions, but registry publication does **not** imply actual end-user registrations.
 
+## Growth execution — real independent agents only
+
+[240 distinctly evaluated, zero-cost growth levers and the evidence-gated priority plan](./docs/growth-240-options.md). The repository also contains a one-time GitHub Actions publication attempt to two independently operated agent directories, gated on verification of the **exact deployed main SHA**; publication is not proof of external use. The public `/health`, `/api/market/stats`, and `/api/agent/now` endpoints disclose the **actual** signed-record storage mode (`process_memory`, `local_sqlite_n4`, or `external_postgres_n4`) without exposing a database URL or claiming a durable financial order ledger. External PostgreSQL is optional and must be configured separately; none was provisioned merely by merging code.
+
 ## Integration
 
 - Signed agent registry: `wss://aimarket-997u.onrender.com/ws/registry` (EIP-191 challenge-response)

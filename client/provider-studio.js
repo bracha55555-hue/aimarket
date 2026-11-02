@@ -110,6 +110,9 @@
       const url = new URL("/seller-inbox",location.origin);
       url.searchParams.set("seller",String(listing.agent_id || agent_id));
       inbox.href = url.pathname + url.search;
+      const feed = new URL("/feed/seller.xml",location.origin);
+      feed.searchParams.set("seller",String(listing.agent_id || agent_id).toLowerCase());
+      $("seller-feed").href=feed.pathname+feed.search;
       $("result").hidden = false;
       // Explicit opt-in only; re-publishing still requires a fresh server proof and wallet signature.
       try {

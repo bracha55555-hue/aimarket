@@ -82,6 +82,16 @@ _n4_db_url=os.getenv("AIMARKET_N4_DATABASE_URL")
 _n4_path=os.getenv("AIMARKET_N4_PATH")
 n4_store=N4PostgresStore(_n4_db_url) if _n4_db_url else (N4Store(_n4_path) if _n4_path else None)
 
+def signed_record_storage_status():
+    if isinstance(n4_store,N4PostgresStore):
+        return {"mode":"external_postgres_n4","survives_app_redeploy":True,
+                "scope":"unexpired signed offers, unfunded requests and nonbinding intents only; not financial settlement or active orders"}
+    if n4_store is not None:
+        return {"mode":"local_sqlite_n4","survives_app_redeploy":False,
+                "scope":"local-only N4; host replacement can erase records, not an order ledger"}
+    return {"mode":"process_memory","survives_app_redeploy":False,
+            "scope":"all listing records vanish on restart; not a durable order ledger"}
+
 def signed_offer_key(data):
     return f"{data['agent_id'].lower()}:{data['capability'].strip().casefold()}:{data['currency']}"
 
@@ -237,7 +247,7 @@ async def health_check():
     # Render injects this public Git SHA at runtime. Never expose arbitrary environment data.
     deploy_sha=os.getenv("RENDER_GIT_COMMIT","")
     revision=deploy_sha if re.fullmatch(r"[0-9a-f]{40}",deploy_sha) else None
-    async with state_lock: return {"status": "online", "deployed_git_sha":revision, "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS, "noncustodial_eth_wallet_payments": True, "noncustodial_btc_atomic_payment": True, "native_sol_trx_quote": True}
+    async with state_lock: return {"status": "online", "deployed_git_sha":revision, "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False, "signed_record_storage": signed_record_storage_status(), "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS, "noncustodial_eth_wallet_payments": True, "noncustodial_btc_atomic_payment": True, "native_sol_trx_quote": True}
 
 def execute_automated_trade(buyer_private_key: str, seller_address: str, amount_wei: int):
     raise RuntimeError("Legacy private-key custody and non-atomic live transfers are disabled for safety")
@@ -595,7 +605,7 @@ async def agent_fast_start(capability: Optional[str] = None, currency: Optional[
             "identity":"The client can create a local identity-only key; no funded wallet required for discovery",
             "notice":"Offline offers verify signing identity only, not skill, contact ownership or availability. Buyer requests are unfunded. No escrow or guaranteed customers.",
             "settlement":{"fees_rate":0.02,"network_fees_extra":True,"payment_verified":False,"escrow":False},
-            "persistence":("Optional local N4; host replacement may lose listings" if n4_store else "Process-local listings; restart clears them"),
+            "persistence":signed_record_storage_status(),
             "currencies":list(FEE_WALLETS)}
 
 FLIGHT_EXAMPLE = "translation,code-review"
@@ -749,7 +759,7 @@ async def public_market_stats():
             "unsettled_orders_in_memory":pending,"open_verified_buyer_requests":len(open_needs),
             "signed_offline_offers":len(signed_offers),
             "unsigned_payments_claimed":False,"nonbinding_intents_proposed":proposed,
-            "nonbinding_intents_accepted":acknowledged,"events_since_start":dict(usage_events),
+            "nonbinding_intents_accepted":acknowledged,"signed_record_storage":signed_record_storage_status(),"events_since_start":dict(usage_events),
             "business_funnel_events":{
                 "buyer_page_requests":usage_events["buyer_studio_views"],
                 "buyer_requests_signed":usage_events["requests_published"],
@@ -1074,16 +1084,16 @@ ul{padding-left:19px}li{margin:12px 0}
 <p class="fine">Connect an EVM-compatible browser wallet to prove identity only; it needs no cryptocurrency balance. You can quote BTC, SOL or TRX using that same identity signer. You must actually be able to deliver your advertised service.</p>
 <div id="status" role="status" aria-live="polite"></div>
 <div id="result" hidden><strong>Published identity-signed offer</strong><p id="detail"></p>
-<p><a id="inbox" href="/seller-inbox">Open seller proposal inbox and acknowledge buyers</a></p>
+<p><a id="inbox" href="/seller-inbox">Open seller proposal inbox and acknowledge buyers</a></p>\n<p><a id="seller-feed" href="/seller-inbox">Subscribe to actual pending buyer proposals via RSS</a></p>
 <p><a href="/api/signed-offers">Browse current published offers</a></p>
-<small>Listings expire after 72 hours; re-sign to renew. A server restart or redeployment may clear them. Check your public inbox yourself: no notifications, escrow or paid orders.</small>
+<small>Listings expire after 72 hours; re-sign to renew. A server restart or redeployment may clear them unless external persistent storage is connected. Optional RSS is polling-based, not push notification. No escrow or paid orders.</small>
 </div></form></section>
 <aside class="card"><h2>What happens next?</h2>
 <ul><li>Your wallet signs one exact message. It never sends a transaction or shares a private key.</li>
 <li>AI Market verifies your signing identity, not your ability, availability or service quality. Scope and example evidence URL are self-declared, not independently verified.</li>
 <li>Buyers can discover your quoted service via MCP and the public marketplace.</li>
 <li>When a genuine buyer request matches your offer, that buyer may submit a separate signed, <strong>nonbinding</strong> proposal.</li>
-<li>You must poll the public inbox and explicitly acknowledge the request. No service is automatically delivered or paid for.</li></ul>
+<li>You can subscribe to public seller RSS or poll the inbox; acknowledgement always needs a separate signature. No service is automatically delivered or paid for.</li></ul>
 <p class="note"><strong>Price and fees:</strong> browsing and publishing are free. The platform charges an advertised 2% only on eligible independently verified crypto settlements. No custody or escrow. ETH/TRX payments may require multiple transfers.</p>
 <p><strong>Headless AI agents:</strong> use our <a href="/client/publish-offer.py">single-file Python provider onboarding client</a> with a locally generated identity-only key. It runs only after explicit --publish, never holds funds, and uses the same EIP-191 verifier as the browser/MCP.</p>
 <p>Programmatic agents can also use <a href="/mcp/server-card">MCP tools</a> or the <a href="/skills/ai-market/SKILL.md">Agent Skill</a>.</p>

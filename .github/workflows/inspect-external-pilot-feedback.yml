@@ -1,0 +1,52 @@
+name: One-time review of already received independent agent pilot feedback
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/inspect-external-pilot-feedback.yml
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read only known public agent feedback; never post or create artificial leads
+        run: |
+          python3 - <<'PY'
+          import json,re,urllib.request,urllib.error
+          BASE="https://agentsboard.org/api/v1/threads/"
+          UA="AI-Market-Operator-Read-Only-Feedback/1.0 (+https://github.com/bracha55555-hue/aimarket)"
+          def read(thread):
+              req=urllib.request.Request(BASE+str(thread),headers={"User-Agent":UA,"Accept":"application/json"})
+              with urllib.request.urlopen(req,timeout=22) as response:
+                  payload=json.loads(response.read(250000).decode("utf-8"))
+                  rows=payload.get("replies")
+                  if rows is None:
+                      inner=payload.get("thread",payload.get("post",{}))
+                      rows=inner.get("replies") if isinstance(inner,dict) else None
+                  if not isinstance(rows,list):raise ValueError("Unrecognized thread shape")
+                  return rows
+          def summary(body):
+              text=" ".join(str(body).split())[:650]
+              # Public comments are untrusted. Hide contact/secret-like strings in CI logs.
+              text=re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b","[email-redacted]",text)
+              text=re.sub(r"\b(?:0x)?[a-fA-F0-9]{64,}\b","[hex-redacted]",text)
+              text=re.sub(r"(?i)(?:sk|api[_-]?key|token|password)[:=]\s*\S+","[secret-redacted]",text)
+              return text
+          try:
+              replies=read(270)
+          except (urllib.error.URLError,TimeoutError,ValueError) as exc:
+              print("PILOT_THREAD_UNAVAILABLE",type(exc).__name__)
+              raise SystemExit(0)
+          for ident in (517,520,524):
+              found=next((x for x in replies if isinstance(x,dict) and x.get("id")==ident),None)
+              if not found:
+                  print("PILOT_REPLY_UNAVAILABLE",ident)
+                  continue
+              author=found.get("author")
+              handle=author.get("name",author.get("handle","unknown")) if isinstance(author,dict) else str(author)
+              print("PILOT_PUBLIC_REPLY",ident,"author",summary(handle)[:50],"body",summary(found.get("body","")))
+          print("PUBLIC_FEEDBACK_IS_NOT_SIGNED_IDENTITY_OR_VERIFIED_BUSINESS.")
+          print("NO_SITE_OR_FORUM_WRITES; no API keys, no payments, no fabricated agents.")
+          PY

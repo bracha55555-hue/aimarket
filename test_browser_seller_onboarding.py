@@ -17,10 +17,14 @@ class OneMinuteProviderStudioTest(unittest.TestCase):
             self.assertIn("Sign identity and list",page.text)
             self.assertIn('href="/seller-inbox"',page.text)
             self.assertIn("seller proposal inbox",page.text)
+            self.assertIn('id="seller-feed"',page.text)
+            self.assertIn("Subscribe to actual pending buyer proposals via RSS",page.text)
             js=c.get("/client/provider-studio.js")
             self.assertEqual(js.status_code,200)
             self.assertIn("personal_sign",js.text)
             self.assertIn("eth_requestAccounts",js.text)
+            self.assertIn('$("seller-feed").href',js.text)
+            self.assertIn('new URL("/feed/seller.xml",location.origin)',js.text)
             for forbidden in ("eth_sendTransaction","send_raw_transaction","privateKey","wallet_sendTransaction"):
                 self.assertNotIn(forbidden,js.text)
             landing=c.get("/",headers={"accept":"text/html"}).text
