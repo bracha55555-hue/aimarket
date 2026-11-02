@@ -1774,6 +1774,54 @@ async def handle_purchase_intent(name,args):
                     "next_step":"Agree on delivery and independently verify the chain-specific payment proof."}
     raise ValueError("unsupported intent tool")
 
+@app.get("/feed/seller.xml")
+async def genuine_seller_proposal_rss(seller: str):
+    """Read-only RSS alerts for authentic, awaiting-response buyer proposals."""
+    if not isinstance(seller,str) or not re.fullmatch(r"0x[a-fA-F0-9]{40}",seller) or not Web3.is_address(seller):
+        return JSONResponse({"error":"valid public seller identity required"},status_code=422)
+    from xml.etree import ElementTree as ET
+    from email.utils import formatdate
+
+    def xml_safe(value):
+        return "".join(c for c in str(value)[:300]
+                       if ord(c) in (9,10,13) or 32<=ord(c)<=0xD7FF
+                       or 0xE000<=ord(c)<=0xFFFD or 0x10000<=ord(c)<=0x10FFFF)
+
+    root_url=PUBLIC_SERVER_URL.rstrip("/")
+    async with state_lock:
+        expire_stale_trades()
+        rows=[public_purchase_intent(x) for x in purchase_intents.values()
+              if x["seller"]==seller.lower() and x["status"]=="proposed"]
+    rows.sort(key=lambda x:(x["created_at_unix"],x["id"]),reverse=True)
+    rss=ET.Element("rss",{"version":"2.0"})
+    channel=ET.SubElement(rss,"channel")
+    for tag,value in (
+        ("title","AI Market — genuine buyer proposals for one seller"),
+        ("link",root_url+"/seller-inbox"),
+        ("description","Public identity-signed, unfunded, nonbinding buyer proposals awaiting this seller's response. Read-only; no order, payment, escrow, delivery or guaranteed work. Records may be lost before expiry on a free-host restart unless durable storage is configured."),
+        ("language","en"),
+        ("ttl","1")
+    ):
+        ET.SubElement(channel,tag).text=value
+    for proposal in rows[:MAX_INTENTS]:
+        item=ET.SubElement(channel,"item")
+        ET.SubElement(item,"title").text=xml_safe("Awaiting seller: "+proposal["capability"])
+        ET.SubElement(item,"link").text=root_url+"/seller-inbox"
+        ET.SubElement(item,"guid",{"isPermaLink":"false"}).text="urn:aimarket:buyer-proposal:"+proposal["id"]
+        ET.SubElement(item,"category").text="Unfunded signed buyer proposal"
+        ET.SubElement(item,"description").text=xml_safe(
+            "A buyer identity-signed an unfunded, nonbinding proposal. "
+            "Capability: "+proposal["capability"]+" | Quote: "+proposal["price"]+
+            " "+proposal["currency"]+" | Expires: "+str(proposal["expires_at_unix"])+
+            " (Unix seconds). Check exact terms and sign locally in the seller inbox; "
+            "this feed never acknowledges proposals or initiates payment.")
+        ET.SubElement(item,"pubDate").text=formatdate(proposal["created_at_unix"],usegmt=True)
+    body=ET.tostring(rss,encoding="utf-8",xml_declaration=True)
+    return Response(body,media_type="application/rss+xml",
+                    headers={"Cache-Control":"public, max-age=30",
+                             "X-Content-Type-Options":"nosniff"})
+
+
 @app.get("/api/purchase-intents")
 async def purchase_intents_api(seller: Optional[str]=None,offer_id: Optional[str]=None):
     try: return await handle_purchase_intent("browse_purchase_intents",{
