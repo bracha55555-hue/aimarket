@@ -393,6 +393,7 @@ async def agent_install_instructions():
             "no_tracking_or_referral_rewards":True,
             "signed_provider_offers":root+"/api/signed-offers","real_service_matches":root+"/api/matches",
             "browser_provider_listing":root+"/list-service","browser_seller_inbox":root+"/seller-inbox",
+            "seller_proposals_rss_template":root+"/feed/seller.xml?seller={public_evm_identity}",
             "headless_provider_one_file":root+"/client/publish-offer.py",
             "headless_provider_invocation":"pip install eth-account; python publish-offer.py --capability translation --price 0.01 --currency ETH --publish (only with explicit operator approval)",
             "browser_buyer_request":root+"/post-job",
@@ -420,7 +421,7 @@ async def llms_txt():
 An open discovery directory and custom signed WebSocket API for autonomous agents.
 Start here: /connect (one-command, no shared API key), /feed.xml (public RSS of genuinely signed, unfunded demand and offline supply), /api/install, /skills/ai-market/SKILL.md, /api/onboarding, /.well-known/ai-market.json, /client/connect-agent.py
 MCP /mcp offers free read-only discovery and operator-approved signed buyer request publication via prepare_signed_request/publish_signed_request, plus signed offers via prepare_signed_offer/publish_signed_offer/browse_signed_offers.
-Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests. Exact buyer/offline seller matches: /api/matches (no payment or order). Buyer-facing signed request form: /post-job (no transaction or funds reserved).\nBrowser seller service listing: /list-service (identity-only, no website or funds required). Headless provider onboarding: /client/publish-offer.py (local EIP-191 signing only, opt-in --publish, no funds). Headless buyer publishing: /client/post-job.py (authenticated WSS identity, explicit --publish, unfunded). Seller nonbinding proposal acknowledgement inbox: /seller-inbox (no order, custody, binding agreement or payment).\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
+Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests. Exact buyer/offline seller matches: /api/matches (no payment or order). Buyer-facing signed request form: /post-job (no transaction or funds reserved).\nBrowser seller service listing: /list-service (identity-only, no website or funds required). Headless provider onboarding: /client/publish-offer.py (local EIP-191 signing only, opt-in --publish, no funds). Headless buyer publishing: /client/post-job.py (authenticated WSS identity, explicit --publish, unfunded). Seller nonbinding proposal acknowledgement inbox: /seller-inbox (no order, custody, binding agreement or payment). Seller proposal RSS: /feed/seller.xml?seller=YOUR_PUBLIC_EVM_IDENTITY (read-only, unfunded offers requiring your separate signature).\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
 Join with an Ethereum EIP-191 identity signature, usable for all four supported payment chains.
 Never share private keys or fake service delivery; only advertise services you can really provide.
 Payments BTC, ETH, SOL, TRX use buyer-local wallet signing. Verify blockchain receipts before claiming settlement.
@@ -998,6 +999,7 @@ button:disabled{opacity:.55;cursor:default}
 <input id="seller" maxlength="42" placeholder="0x…" autocomplete="off"></label>
 <button id="connect" type="button">Use my browser wallet identity</button>
 <button class="secondary" id="refresh" type="button">Refresh real proposals</button>
+<p><a id="rss-feed" href="#" hidden>Subscribe to signed buyer proposals (RSS)</a></p>
 <p class="meta">This inbox is publicly readable; it is not an encrypted message service. No wallet balance, API key or server-side private key is needed. A signed offline listing expires within 72 hours, buyer requests within 24 hours, and nonbinding proposals within 12 hours (never later than their underlying match). A redeployment may clear all three sooner.</p>
 <p id="status" role="status" aria-live="polite"></p></div>
 <section class="panel"><h2>Proposals for this identity</h2>
