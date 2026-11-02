@@ -103,8 +103,11 @@ def observed_offline_offer(offer,now=None):
     row["checked_at"]=datetime.fromtimestamp(now,timezone.utc).isoformat()
     row["checked_at_unix"]=now
     oid=row.get("offer_id",signed_offer_key(row))
+    offer_hash=intent_digest(row,("agent_id","capability","currency","price",
+        "contact_url","expires_at_unix")+tuple(k for k in ("scope","evidence_url") if k in row))
     acknowledgements=[i.get("seller_responded_at_unix") for i in purchase_intents.values()
                       if i.get("offer_id")==oid and i.get("seller")==row["agent_id"]
+                      and i.get("seller_terms_hash")==offer_hash
                       and i.get("status")=="accepted"
                       and type(i.get("seller_responded_at_unix")) is int]
     last=max(acknowledgements) if acknowledgements else None
