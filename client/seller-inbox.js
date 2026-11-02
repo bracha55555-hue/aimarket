@@ -21,6 +21,14 @@
     return result;
   }
   const currentSeller = () => $("seller").value.trim();
+  const rssLink=$("rss-feed");
+  function updateRssLink() {
+    const seller=currentSeller();
+    const valid=validAddress(seller);
+    rssLink.hidden=!valid;
+    if(valid) rssLink.href="/feed/seller.xml?seller="+encodeURIComponent(seller.toLowerCase());
+    else rssLink.removeAttribute("href");
+  }
   async function connectWallet() {
     if (!window.ethereum || typeof window.ethereum.request !== "function")
       throw new Error("Install a compatible EVM wallet for identity-only signing (no funds needed)");
@@ -30,6 +38,7 @@
     return addresses[0];
   }
   async function refresh() {
+    updateRssLink();
     const seller=currentSeller();
     if(!validAddress(seller)) {
       notify("Enter a valid public seller identity or connect your wallet.", "error");
@@ -134,6 +143,8 @@
       notify(error.message || String(error),"error");
     }
   });
+  $("seller").addEventListener("input",updateRssLink);
+  updateRssLink();
   $("refresh").addEventListener("click",async()=>{
     try { await refresh(); }
     catch(error) { notify(error.message || String(error),"error"); }
