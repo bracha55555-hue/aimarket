@@ -82,6 +82,16 @@ _n4_db_url=os.getenv("AIMARKET_N4_DATABASE_URL")
 _n4_path=os.getenv("AIMARKET_N4_PATH")
 n4_store=N4PostgresStore(_n4_db_url) if _n4_db_url else (N4Store(_n4_path) if _n4_path else None)
 
+def signed_record_storage_status():
+    if isinstance(n4_store,N4PostgresStore):
+        return {"mode":"external_postgres_n4","survives_app_redeploy":True,
+                "scope":"unexpired signed offers, unfunded requests and nonbinding intents only; not financial settlement or active orders"}
+    if n4_store is not None:
+        return {"mode":"local_sqlite_n4","survives_app_redeploy":False,
+                "scope":"local-only N4; host replacement can erase records, not an order ledger"}
+    return {"mode":"process_memory","survives_app_redeploy":False,
+            "scope":"all listing records vanish on restart; not a durable order ledger"}
+
 def signed_offer_key(data):
     return f"{data['agent_id'].lower()}:{data['capability'].strip().casefold()}:{data['currency']}"
 
@@ -237,7 +247,7 @@ async def health_check():
     # Render injects this public Git SHA at runtime. Never expose arbitrary environment data.
     deploy_sha=os.getenv("RENDER_GIT_COMMIT","")
     revision=deploy_sha if re.fullmatch(r"[0-9a-f]{40}",deploy_sha) else None
-    async with state_lock: return {"status": "online", "deployed_git_sha":revision, "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False, "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS, "noncustodial_eth_wallet_payments": True, "noncustodial_btc_atomic_payment": True, "native_sol_trx_quote": True}
+    async with state_lock: return {"status": "online", "deployed_git_sha":revision, "role": "AI Market agent coordination", "connected_agents": len(active_agents), "active_trades": len(active_trades), "verified_settlement": False, "escrow": False, "durable_trades": False, "signed_record_storage": signed_record_storage_status(), "ephemeral_trade_ttl_seconds": TRADE_TTL_SECONDS, "noncustodial_eth_wallet_payments": True, "noncustodial_btc_atomic_payment": True, "native_sol_trx_quote": True}
 
 def execute_automated_trade(buyer_private_key: str, seller_address: str, amount_wei: int):
     raise RuntimeError("Legacy private-key custody and non-atomic live transfers are disabled for safety")
@@ -595,7 +605,7 @@ async def agent_fast_start(capability: Optional[str] = None, currency: Optional[
             "identity":"The client can create a local identity-only key; no funded wallet required for discovery",
             "notice":"Offline offers verify signing identity only, not skill, contact ownership or availability. Buyer requests are unfunded. No escrow or guaranteed customers.",
             "settlement":{"fees_rate":0.02,"network_fees_extra":True,"payment_verified":False,"escrow":False},
-            "persistence":("Optional local N4; host replacement may lose listings" if n4_store else "Process-local listings; restart clears them"),
+            "persistence":signed_record_storage_status(),
             "currencies":list(FEE_WALLETS)}
 
 FLIGHT_EXAMPLE = "translation,code-review"
@@ -749,7 +759,7 @@ async def public_market_stats():
             "unsettled_orders_in_memory":pending,"open_verified_buyer_requests":len(open_needs),
             "signed_offline_offers":len(signed_offers),
             "unsigned_payments_claimed":False,"nonbinding_intents_proposed":proposed,
-            "nonbinding_intents_accepted":acknowledged,"events_since_start":dict(usage_events),
+            "nonbinding_intents_accepted":acknowledged,"signed_record_storage":signed_record_storage_status(),"events_since_start":dict(usage_events),
             "business_funnel_events":{
                 "buyer_page_requests":usage_events["buyer_studio_views"],
                 "buyer_requests_signed":usage_events["requests_published"],
