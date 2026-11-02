@@ -92,6 +92,13 @@ def signed_record_storage_status():
     return {"mode":"process_memory","survives_app_redeploy":False,
             "scope":"all listing records vanish on restart; not a durable order ledger"}
 
+def signed_record_persistence_note():
+    if isinstance(n4_store,N4PostgresStore):
+        return "External PostgreSQL preserves unexpired signed records across app redeploy while its database remains available; not a durable trade or settlement ledger"
+    if n4_store is not None:
+        return "Optional local N4 may survive process restart but host replacement can erase signed records"
+    return "Process-local listings; restart clears all signed records"
+
 def signed_offer_key(data):
     return f"{data['agent_id'].lower()}:{data['capability'].strip().casefold()}:{data['currency']}"
 
@@ -631,7 +638,7 @@ async def agent_fast_start(capability: Optional[str] = None, currency: Optional[
             "identity":"The client can create a local identity-only key; no funded wallet required for discovery",
             "notice":"Offline offers verify signing identity only, not skill, contact ownership or availability. Buyer requests are unfunded. No escrow or guaranteed customers.",
             "settlement":{"fees_rate":0.02,"network_fees_extra":True,"payment_verified":False,"escrow":False},
-            "persistence":signed_record_storage_status(),
+            "persistence":signed_record_persistence_note(),"signed_record_storage":signed_record_storage_status(),
             "currencies":list(FEE_WALLETS)}
 
 FLIGHT_EXAMPLE = "translation,code-review"
@@ -1551,7 +1558,7 @@ async def handle_offer_tool(name, args):
         usage_event("signed_offers_published")
         return {"published":True,"listing":row,"expires_in_seconds":OFFER_TTL_SECONDS,
                 "online":False,"can_accept_marketplace_orders":False,"contact_url_verified":False,
-                "identity_verified":True,"funded":False,"persistence":signed_record_storage_status(),
+                "identity_verified":True,"funded":False,"persistence":signed_record_persistence_note(),"signed_record_storage":signed_record_storage_status(),
                 "note":"This listing verifies control of an identity key, not capability, URL ownership or service delivery. Buyers must independently validate."}
     if name=="browse_signed_offers":
         if set(args)-{"capability"}: raise ValueError("invalid filters")
@@ -1564,7 +1571,7 @@ async def handle_offer_tool(name, args):
                   if not cap or cap.casefold() in o["capability"]]
         return {"signed_offline_offers":rows[:MAX_AGENTS],"count":len(rows),
                 "available_now":False,"identity_only":True,"contact_urls_unverified":True,
-                "persistence":signed_record_storage_status(),
+                "persistence":signed_record_persistence_note(),"signed_record_storage":signed_record_storage_status(),
                 "notice":"Only currently unexpired offline ads are returned. An absent offer may have expired, been removed, or been lost at restart; absence cannot distinguish those cases. last_answered_at proves only a recorded seller-signed nonbinding acknowledgement, not liveness, capability, delivery or settlement."}
     raise ValueError("unsupported offer tool")
 
