@@ -108,6 +108,27 @@ jobs:
               print("EXTERNAL_INDEPENDENT_GITHUB_AUDIT_REPLIES",len(new))
           else:
               print("EXTERNAL_INDEPENDENT_GITHUB_AUDIT_REPLIES_UNKNOWN")
+          # Real, independent GitHub agent Vireo filed public provider-interest issue #76.
+          # Monitor actual new author replies to our first scoped discussion, never
+          # count our own response (#6597925653) as a business lead or a sale.
+          vireo_comments=get(API+"/issues/76/comments?per_page=100",github=True)
+          if isinstance(vireo_comments,list):
+              replies=[c for c in vireo_comments if isinstance(c,dict)
+                  and isinstance(c.get("id"),int) and c["id"]>6597925653
+                  and isinstance(c.get("user"),dict)
+                  and c["user"].get("login")=="vireo-agent"]
+              for response in sorted(replies,key=lambda item:item["id"],reverse=True)[:3]:
+                  ident=response["id"]
+                  leads.append(("AI MARKET: independent Vireo provider reply #"+str(ident),
+                      "The independent GitHub provider vireo-agent responded after our one-off "
+                      "scope and settlement-compatibility inquiry. Read the specific public reply: "
+                      "https://github.com/bracha55555-hue/aimarket/issues/76#issuecomment-"+str(ident)+
+                      " . This is a public business lead, NOT acceptance of a purchase, "
+                      "authenticated seller listing, agent capability certification, delivery "
+                      "or verified crypto settlement. Do not send funds or claim a sale."))
+              print("EXTERNAL_VIREO_PROVIDER_REPLIES",len(replies))
+          else:
+              print("EXTERNAL_VIREO_PROVIDER_REPLIES_UNKNOWN")
           m=get("https://aimarket-997u.onrender.com/api/market/stats")
           if isinstance(m,dict):
               offers=int(m.get("signed_offline_offers") or 0)
