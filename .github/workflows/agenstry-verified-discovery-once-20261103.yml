@@ -1,0 +1,73 @@
+name: One-time truthful AI Market A2A discovery via Agenstry
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/agenstry-verified-discovery-once-20261103.yml]
+permissions:
+  contents: read
+jobs:
+  agenstry_public_a2a:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - name: Publish one real public agent card using documented free validation
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json,os,time,urllib.request,urllib.error
+          root="https://aimarket-997u.onrender.com"
+          card_url=root+"/.well-known/agent-card.json"
+          directory="https://agenstry.com/a2a"
+          agent="AI-Market-Public-Discovery-Once/1.0 (+https://github.com/bracha55555-hue/aimarket)"
+          def read_json(url):
+              req=urllib.request.Request(url,headers={"Accept":"application/json","User-Agent":agent})
+              with urllib.request.urlopen(req,timeout=25) as res:
+                  if res.status!=200:raise ValueError("public health or card unavailable")
+                  data=res.read(250001)
+              if len(data)>250000:raise ValueError("oversized public response")
+              return json.loads(data)
+          for attempt in range(42):
+              try:
+                  health=read_json(root+"/health")
+                  card=read_json(card_url)
+                  if health.get("status")!="online" or health.get("deployed_git_sha")!=os.environ["EXPECTED_SHA"]:
+                      raise ValueError("target revision not live")
+                  if card.get("capabilities",{}).get("streaming") is not False:
+                      raise ValueError("unexpected streaming claim")
+                  if not any(isinstance(v,dict) and v.get("protocolBinding")=="JSONRPC"
+                             and v.get("protocolVersion")=="1.0" and v.get("url")==root+"/a2a"
+                             for v in card.get("supportedInterfaces",[])):
+                      raise ValueError("public A2A 1.0 card mismatch")
+                  print("EXACT_LIVE_A2A_CARD",os.environ["EXPECTED_SHA"])
+                  break
+              except (ValueError,OSError,KeyError,TypeError,TimeoutError) as exc:
+                  print("AWAIT_EXACT_LIVE",attempt+1,type(exc).__name__)
+                  if attempt==41:raise RuntimeError("No directory request without verified current live card")
+                  time.sleep(8)
+          payload={"jsonrpc":"2.0","id":"ai-market-agenstry-once",
+                   "method":"SendMessage","params":{"message":{
+                       "messageId":"ai-market-20261103-public-card",
+                       "role":"ROLE_USER","parts":[{"text":"validate: "+root}]}}}
+          req=urllib.request.Request(directory,method="POST",
+              data=json.dumps(payload,separators=(",",":")).encode("utf-8"),
+              headers={"Content-Type":"application/json","Accept":"application/json",
+                       "A2A-Version":"1.0","User-Agent":agent})
+          try:
+              with urllib.request.urlopen(req,timeout=45) as res:
+                  status=res.status
+                  raw=res.read(250001)
+          except urllib.error.HTTPError as exc:
+              status=exc.code
+              raw=exc.read(5000)
+          print("AGENSTRY_ONETIME_VALIDATION_HTTP",status)
+          if status!=200 or len(raw)>250000:
+              raise RuntimeError("No successful public validation; do not claim listing")
+          reply=json.loads(raw)
+          if not isinstance(reply,dict) or reply.get("jsonrpc")!="2.0" or reply.get("error") is not None or reply.get("result") is None:
+              raise RuntimeError("Agenstry response does not confirm a valid A2A result")
+          result=reply["result"]
+          print("AGENSTRY_PUBLIC_RESPONSE_TYPE",type(result).__name__)
+          print("A2A validation requested once for an existing public endpoint; directory indexing and customer acquisition NOT verified.")
+          print("No fictional agent, job, money, wallet secret, external contact or recurring submission.")
+          PY
