@@ -31,6 +31,8 @@ jobs:
         run: python -m unittest -v test_indexnow_new_pages.py
       - name: Verify genuine read-only A2A 1.0 AgentCard and JSONRPC service
         run: python -m unittest -v test_a2a_discovery.py
+      - name: Verify actual first-buyer conversion CTAs never imply authenticated or paid work
+        run: python -m unittest -v test_buyer_marketing_conversion.py
       - name: Verify public role-specific organic buyer and provider landing pages
         run: python -m unittest -v test_organic_landing.py
       - name: Verify business homepage shows real market state and safely escapes untrusted offers
