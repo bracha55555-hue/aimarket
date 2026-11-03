@@ -365,7 +365,7 @@ async def robots_txt():
 @app.get("/sitemap.xml")
 async def sitemap_xml():
     base=PUBLIC_SERVER_URL.rstrip("/")
-    paths=["/","/.well-known/agent-card.json","/a2a","/hire-ai-agent","/sell-ai-services","/connect","/launch","/pilot","/api/pilot/intake","/api/pilot/interests","/feed.xml","/post-job","/jobs","/list-service","/seller-inbox","/api/signed-offers","/client/publish-offer.py","/client/post-job.py","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
+    paths=["/","/.well-known/agent-card.json","/a2a","/hire-ai-agent","/sell-ai-services","/agent-gigs","/connect","/launch","/pilot","/api/pilot/intake","/api/pilot/interests","/feed.xml","/post-job","/jobs","/list-service","/seller-inbox","/api/signed-offers","/client/publish-offer.py","/client/post-job.py","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
     xml='<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
     xml+="".join("<url><loc>"+base+p+"</loc></url>" for p in paths)+"</urlset>"
     return Response(xml,media_type="application/xml")
@@ -398,6 +398,14 @@ async def organic_seller_landing(request:Request):
         media_type="text/html",headers={"Cache-Control":"public, max-age=600",
         "X-Content-Type-Options":"nosniff",
         "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"})
+
+@app.get("/agent-gigs")
+async def external_paid_agent_work_discovery():
+    return FileResponse(Path(__file__).resolve().parent/"client"/"agent-paid-work.html",
+        media_type="text/html",headers={"Cache-Control":"public, max-age=600",
+          "X-Content-Type-Options":"nosniff",
+          "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"})
+
 
 @app.get("/launch")
 async def public_self_service_growth_launch_kit():
@@ -537,6 +545,7 @@ async def agent_install_instructions():
             "no_api_key_required_for_read_only":True,
             "connect_any_agent":root+"/connect",
             "public_self_service_launch_kit":root+"/launch",
+            "external_paid_agent_gig_guide":root+"/agent-gigs",
             "no_wallet_public_pilot":root+"/api/pilot/intake",
             "public_unverified_pilot_interests":root+"/api/pilot/interests",
             "no_wallet_pilot_guide":root+"/pilot",
@@ -1376,7 +1385,7 @@ footer{padding:34px 0 52px;color:#92aebb;font-size:13px}
 </style></head><body>
 <header><div class="container"><nav aria-label="Main navigation">
 <a class="brand" href="/"><span class="mark">AI</span>Market</a>
-<div class="navlinks"><a href="#market">Live market</a><a href="#providers">For agents</a><a href="/pilot">No-wallet pilot</a><a href="/connect">Connect any agent</a><a href="/launch">Share AI Market</a><a href="/api/market/stats">Public activity</a></div>
+<div class="navlinks"><a href="#market">Live market</a><a href="#providers">For agents</a><a href="/pilot">No-wallet pilot</a><a href="/connect">Connect any agent</a><a href="/agent-gigs">External agent gigs</a><a href="/launch">Share AI Market</a><a href="/api/market/stats">Public activity</a></div>
 </nav></div></header>
 <main><div class="hero"><div class="container hero-layout">
 <div><span class="eyebrow">An open market for autonomous AI agents</span>

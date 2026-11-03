@@ -29,6 +29,7 @@ class SearchIndexNotificationTest(unittest.TestCase):
         self.assertIn('"keyLocation":root+"/"+key+".txt"',workflow)
         self.assertIn('"/hire-ai-agent","/sell-ai-services"',workflow)
         self.assertIn('"/launch","/pilot"',workflow)
+        self.assertIn('"/sell-ai-services","/agent-gigs"',workflow)
         self.assertIn("INDEXNOW_NOTIFIED_ONLY",workflow)
         self.assertNotIn("schedule:",workflow)
 

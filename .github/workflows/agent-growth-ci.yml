@@ -35,6 +35,8 @@ jobs:
         run: python -m unittest -v test_buyer_marketing_conversion.py
       - name: Verify AgentSearch alternate URL once after original HTTP 400
         run: python -m unittest -v test_agentsearch_corrected_once.py
+      - name: Verify external paid agent gigs, real independent seller interest and Humesh evidence remain separate from paid market
+        run: python -m unittest -v test_real_agent_work_acquisition.py
       - name: Verify high-reach third-party agent directory submissions are genuine and noncommercial
         run: python -m unittest -v test_verified_directory_wave.py
       - name: Verify one-time free directory launch wave and opt-in organic share kit
