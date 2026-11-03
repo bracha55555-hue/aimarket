@@ -37,6 +37,18 @@ class RealBusinessAcquisitionEvidenceAuditTest(unittest.TestCase):
         self.assertIn("LEAD_ALREADY_RECORDED",watcher)
         self.assertNotIn("create_fake_listing",watcher)
 
+    def test_first_independent_public_buyer_issue_is_actioned_without_fabricated_commerce(self):
+        watcher=Path(".github/workflows/first-independent-lead-watch.yml").read_text("utf-8")
+        self.assertIn('API+"/issues?state=open&per_page=100"',watcher)
+        self.assertIn('x["title"].startswith("[Public buyer interest] ")',watcher)
+        self.assertIn('and x["user"].get("login")!="bracha55555-hue"',watcher)
+        self.assertIn('"https://github.com/bracha55555-hue/aimarket/issues/"+',watcher)
+        self.assertIn("PUBLIC_INDEPENDENT_UNVERIFIED_BUYER_ISSUES",watcher)
+        self.assertIn("It is not signed demand, identity proof, a funded order",watcher)
+        self.assertIn("PUBLIC_BUYER_INTEREST_SOURCE_UNAVAILABLE",watcher)
+        self.assertIn("LEAD_ALREADY_RECORDED",watcher)
+        self.assertNotIn("auto_send_payment",watcher)
+
     def test_existing_scheduled_audit_only_reads_public_outreach_and_production(self):
         audit=Path(".github/workflows/market-live-audit.yml").read_text("utf-8")
         self.assertIn('"production_agent_connect_guide"',audit)

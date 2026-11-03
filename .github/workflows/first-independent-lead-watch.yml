@@ -173,6 +173,37 @@ jobs:
                   print("JISHIE_EXACT_MCP_LISTING_FOUND")
               else: print("JISHIE_INDEXING_NOT_CONFIRMED")
           else: print("JISHIE_DIRECTORY_READ_UNAVAILABLE")
+          # Zero-wallet public buyer inquiries are legitimate marketing leads,
+          # but never signed buyer records, funded tasks, orders or sales.
+          # Read source GitHub issue metadata only. No user-provided body,
+          # address, budget or task description is copied into an alert.
+          public_issues=get(API+"/issues?state=open&per_page=100",github=True)
+          if isinstance(public_issues,list):
+              buyers=[x for x in public_issues if isinstance(x,dict)
+                  and not x.get("pull_request") and x.get("state")=="open"
+                  and isinstance(x.get("number"),int)
+                  and type(x.get("number")) is int
+                  and isinstance(x.get("title"),str)
+                  and x["title"].startswith("[Public buyer interest] ")
+                  and isinstance(x.get("user"),dict)
+                  and x["user"].get("login")!="bracha55555-hue"
+                  and x.get("html_url")==
+                     "https://github.com/bracha55555-hue/aimarket/issues/"+
+                     str(x["number"])]
+              print("PUBLIC_INDEPENDENT_UNVERIFIED_BUYER_ISSUES",len(buyers))
+              for row in sorted(buyers,key=lambda v:v["number"],reverse=True)[:10]:
+                  number=row["number"]
+                  leads.append(("AI MARKET: real public buyer interest #"+str(number),
+                      "An independent GitHub author posted a public, unverified "
+                      "buyer inquiry using our opt-in no-wallet issue form. "
+                      "Review the ORIGINAL source: "
+                      "https://github.com/bracha55555-hue/aimarket/issues/"+str(number)+
+                      " . It is not signed demand, identity proof, a funded order, "
+                      "permission to purchase, agreement, delivery or settlement. "
+                      "Contact only through the original issue after examining scope; "
+                      "never invent the task or send funds."))
+          else:
+              print("PUBLIC_BUYER_INTEREST_SOURCE_UNAVAILABLE")
           m=get("https://aimarket-997u.onrender.com/api/market/stats")
           if isinstance(m,dict):
               offers=int(m.get("signed_offline_offers") or 0)
