@@ -1,0 +1,127 @@
+name: One-time public agent discovery distribution and independent Humesh interop check
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/real-agent-partner-distribution-20261103.yml
+permissions:
+  contents: read
+jobs:
+  independent_humesh_readonly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Inspect exact current public A2A discovery without registrations, messages or credentials
+        run: |
+          python3 - <<'PY'
+          import json,urllib.request,urllib.error,hashlib
+          endpoints={
+              "AI_MARKET":"https://aimarket-997u.onrender.com/.well-known/agent-card.json",
+              "HUMESH":"https://humesh.netlify.app/.well-known/agent-card.json"}
+          def get(url):
+              req=urllib.request.Request(url,headers={
+                  "Accept":"application/json","User-Agent":"AI-Market-Operator-Independent-Read-Only-Interop/1.0"})
+              with urllib.request.urlopen(req,timeout=24) as response:
+                  if response.status!=200:raise ValueError("non-200 agent card")
+                  data=response.read(300001)
+              if len(data)>300000:raise ValueError("Oversized public card")
+              return json.loads(data.decode("utf-8")),hashlib.sha256(data).hexdigest()
+          for name,url in endpoints.items():
+              try:
+                  body,digest=get(url)
+                  if not isinstance(body,dict):raise ValueError("Expected JSON agent card object")
+                  interfaces=body.get("supportedInterfaces")
+                  if not isinstance(interfaces,list):interfaces=[]
+                  versions=[{"protocolVersion":i.get("protocolVersion"),"protocolBinding":i.get("protocolBinding")}
+                            for i in interfaces if isinstance(i,dict)][:12]
+                  print("PUBLIC_PARTNER_AGENT_CARD",json.dumps({
+                      "source":name,"url":url,"sha256_raw_bytes":digest,
+                      "name":str(body.get("name",""))[:80],
+                      "public_interface_protocols":versions,
+                      "supports_streaming":body.get("capabilities",{}).get("streaming") if isinstance(body.get("capabilities"),dict) else None,
+                      "signature_or_provider_independence_verified":False,
+                      "invocation_or_delivery_tested":False},sort_keys=True))
+              except (OSError,ValueError,TimeoutError,json.JSONDecodeError) as error:
+                  print("PUBLIC_PARTNER_AGENT_CARD_UNAVAILABLE",name,type(error).__name__)
+          print("Read-only published discovery only. No enrollment, fake offer, purchase, message send or authorization.")
+          PY
+  jishie_free_directory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - name: Register our genuine public read-only MCP once in jishie after exact live main revision
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json,os,time,urllib.error,urllib.request
+          ROOT="https://aimarket-997u.onrender.com"
+          CARD=ROOT+"/.well-known/agent-card.json"
+          MCP=ROOT+"/mcp"
+          DIRECTORY="https://jishie.com"
+          HEADERS={"User-Agent":"AI-Market-Operator-Truthful-One-Time-Directory/1.0 (+https://github.com/bracha55555-hue/aimarket)",
+                   "Accept":"application/json"}
+          def read(url,limit=4000000,timeout=24):
+              request=urllib.request.Request(url,headers=HEADERS)
+              with urllib.request.urlopen(request,timeout=timeout) as response:
+                  if response.status!=200:raise ValueError("source non-200")
+                  data=response.read(limit+1)
+              if len(data)>limit:raise ValueError("source oversized")
+              return json.loads(data.decode("utf-8"))
+          for attempt in range(31):
+              try:
+                  live=read(ROOT+"/health")
+                  if live.get("deployed_git_sha")!=os.environ["EXPECTED_SHA"]:
+                      raise ValueError("live exact main SHA not ready")
+                  card=read(CARD)
+                  if card.get("capabilities",{}).get("streaming") is not False:
+                      raise ValueError("Cannot corroborate honest public A2A card")
+                  if not any(x.get("protocolBinding")=="JSONRPC" and x.get("url")==ROOT+"/a2a"
+                             for x in card.get("supportedInterfaces",[]) if isinstance(x,dict)):
+                      raise ValueError("Public A2A card not valid")
+                  print("EXACT_LIVE_MARKET_REVISION_CONFIRMED",live["deployed_git_sha"])
+                  break
+              except (ValueError,OSError,TimeoutError,KeyError) as exc:
+                  print("WAIT_FOR_EXACT_PRODUCTION",attempt+1,type(exc).__name__)
+              if attempt==30:raise RuntimeError("Do not submit any directory listing before valid exact live revision")
+              time.sleep(8)
+          catalog=read(DIRECTORY+"/v1/agents.json",limit=9500000,timeout=40)
+          candidates=catalog if isinstance(catalog,list) else catalog.get("agents",catalog.get("records",[]))
+          if not isinstance(candidates,list):raise RuntimeError("Unknown directory catalog shape: not safe to post")
+          if any(isinstance(item,dict) and
+                 (ROOT in str(item.get("mcp_endpoint","")) or
+                  ROOT in str(item.get("protocols",{})) or
+                  item.get("name")=="AI Market" or
+                  ROOT in str(item.get("mcp_url","")))
+                 for item in candidates):
+              print("JISHIE_ALREADY_LISTED_SKIP_NO_DUPLICATE")
+              raise SystemExit(0)
+          payload={
+             "name":"AI Market",
+             "mcp_endpoint":MCP,
+             "skills":["agent-discovery","agent-service-discovery","general-tools"]
+          }
+          # Documented free builder endpoint: https://jishie.com/for-operators.html
+          request=urllib.request.Request(DIRECTORY+"/v1/agents",method="POST",
+                     data=json.dumps(payload,separators=(",",":"),sort_keys=True).encode("utf-8"),
+                     headers={**HEADERS,"Content-Type":"application/json"})
+          try:
+              with urllib.request.urlopen(request,timeout=36) as response:
+                  code=response.status
+                  # Never log any API keys or untrusted response body.
+                  data=response.read(10000).decode("utf-8","replace")
+          except urllib.error.HTTPError as error:
+              code=error.code
+              data=error.read(3000).decode("utf-8","replace")
+          print("JISHIE_REAL_AGENT_SUBMISSION_HTTP",code)
+          if code not in (200,201,202,409):
+              try:
+                  parsed=json.loads(data)
+                  print("JISHIE_PUBLIC_ERROR_CODE",str(parsed.get("code",parsed.get("error","unclassified")))[:75])
+              except (ValueError,AttributeError):
+                  print("JISHIE_PUBLIC_ERROR_NONJSON")
+              raise RuntimeError("No directory acceptance; no hidden retry, paid boost or duplicate submission")
+          print("Free directory accepted one authentic public MCP endpoint submission.")
+          print("Submission is NOT indexing, external agent usage, business volume, seller capability or verified revenue.")
+          print("No personal contact, credential, token, private key, transaction or money sent.")
+          PY
