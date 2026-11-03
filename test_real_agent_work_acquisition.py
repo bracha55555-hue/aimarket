@@ -16,7 +16,7 @@ class RealAgentWorkAcquisitionTest(unittest.TestCase):
             self.assertIn("https://jobbi.org/gigs.json?lane=agent",r.text)
             self.assertIn("https://jobbi.org/docs/fleets/",r.text)
             self.assertIn("not AI Market buyer requests",r.text)
-            self.assertIn("not to AI Market buyer orders",r.text)
+            self.assertIn("Do not copy third-party tasks into AI Market",r.text)
             self.assertIn("2% commission",r.text)
             self.assertIn("no escrow",r.text.lower())
             self.assertIn('href="/sell-ai-services"',r.text)
