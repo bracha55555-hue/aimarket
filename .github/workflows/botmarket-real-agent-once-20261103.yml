@@ -1,0 +1,76 @@
+name: One-time real AI Market A2A registration in BotMarket
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/botmarket-real-agent-once-20261103.yml
+permissions:
+  contents: read
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - name: Validate actual live A2A and submit one noncommercial registry entry only
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json,os,time,urllib.error,urllib.request
+          root="https://aimarket-997u.onrender.com"
+          registry="https://botmarket.bot/v1/submit"
+          headers={"User-Agent":"AI-Market-Operator-Official-Directory-Submission/1.0 (+https://github.com/bracha55555-hue/aimarket)","Accept":"application/json"}
+          def get(url):
+              request=urllib.request.Request(url,headers=headers)
+              with urllib.request.urlopen(request,timeout=24) as response:
+                  if response.status!=200:raise ValueError("unexpected read status")
+                  data=response.read(180001)
+              if len(data)>180000:raise ValueError("oversized read")
+              return json.loads(data.decode("utf-8"))
+          for attempt in range(31):
+              try:
+                  health=get(root+"/health")
+                  if health.get("deployed_git_sha")!=os.environ["EXPECTED_SHA"]:
+                      raise ValueError("exact main revision not live")
+                  card=get(root+"/.well-known/agent-card.json")
+                  protocols=card.get("supportedInterfaces")
+                  if not isinstance(protocols,list) or not any(
+                      isinstance(v,dict) and v.get("protocolBinding")=="JSONRPC"
+                      and v.get("protocolVersion")=="1.0" and v.get("url")==root+"/a2a"
+                      for v in protocols):
+                      raise ValueError("genuine A2A JSONRPC 1.0 not verified")
+                  if card.get("capabilities",{}).get("streaming") is not False:
+                      raise ValueError("unsupported streaming wrongly declared")
+                  print("EXACT_PUBLIC_DEPLOYED_MAIN_SHA",health["deployed_git_sha"])
+                  break
+              except (ValueError,OSError,TimeoutError,KeyError,TypeError) as exc:
+                  print("WAITING_FOR_REAL_LIVE_A2A",attempt+1,type(exc).__name__)
+                  if attempt==30:
+                      raise RuntimeError("No directory submission if exact production A2A cannot be verified")
+                  time.sleep(8)
+          def submit(dry_run):
+              payload={"kind":"agent","url":root,"dry_run":dry_run}
+              request=urllib.request.Request(registry,data=json.dumps(payload,separators=(",",":")).encode(),
+                  method="POST",headers={**headers,"Content-Type":"application/json"})
+              try:
+                  with urllib.request.urlopen(request,timeout=34) as response:
+                      code=response.status
+                      response.read(100000)
+              except urllib.error.HTTPError as exc:
+                  code=exc.code
+                  exc.read(2000)
+              return code
+          # Published registry contract: https://botmarket.bot/llms.txt
+          status=submit(True)
+          print("BOTMARKET_AGENT_VALIDATE_ONLY_HTTP",status)
+          if status not in (200,201,202):
+              raise RuntimeError("Directory refused validation: no real registration was submitted")
+          print("Validated public agent card; validation is not listing.")
+          status=submit(False)
+          print("BOTMARKET_SINGLE_REAL_AGENT_SUBMISSION_HTTP",status)
+          if status not in (200,201,202,409):
+              raise RuntimeError("Directory did not accept submission; no retries or false indexing claim")
+          print("One truthful live A2A registration submission accepted or recognized as duplicate.")
+          print("No fabricated users, job posts, private keys, payments, email, account or follow-up spam.")
+          print("HTTP acceptance is NOT an indexed listing, acquired agent, buyer, paid order or verified revenue.")
+          PY
