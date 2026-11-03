@@ -43,6 +43,10 @@ jobs:
         run: python -m unittest -v test_organic_marketing_distribution.py
       - name: Verify public role-specific organic buyer and provider landing pages
         run: python -m unittest -v test_organic_landing.py
+      - name: Verify optional partner widget preserves genuine public market truth
+        run: |
+          node --check client/market-embed.js
+          python -m unittest -v test_market_embed.py
       - name: Verify business homepage shows real market state and safely escapes untrusted offers
         run: python -m unittest -v test_market_homepage.py
       - name: Verify N4 database save, reload and corruption detection

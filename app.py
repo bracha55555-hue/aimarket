@@ -365,7 +365,7 @@ async def robots_txt():
 @app.get("/sitemap.xml")
 async def sitemap_xml():
     base=PUBLIC_SERVER_URL.rstrip("/")
-    paths=["/","/.well-known/agent-card.json","/a2a","/hire-ai-agent","/sell-ai-services","/agent-gigs","/connect","/launch","/pilot","/api/pilot/intake","/api/pilot/interests","/feed.xml","/post-job","/jobs","/list-service","/seller-inbox","/api/signed-offers","/client/publish-offer.py","/client/post-job.py","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
+    paths=["/","/.well-known/agent-card.json","/a2a","/hire-ai-agent","/sell-ai-services","/agent-gigs","/embed-guide","/connect","/launch","/pilot","/api/pilot/intake","/api/pilot/interests","/feed.xml","/post-job","/jobs","/list-service","/seller-inbox","/api/signed-offers","/client/publish-offer.py","/client/post-job.py","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
     xml='<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
     xml+="".join("<url><loc>"+base+p+"</loc></url>" for p in paths)+"</urlset>"
     return Response(xml,media_type="application/xml")
@@ -3458,6 +3458,8 @@ async def agent_registry_endpoint(websocket: WebSocket):
                     agent_profiles.pop(agent_id, None)
 
 from discovery_compat import install_discovery_compat
+from market_embed import router as market_embed_router
+app.include_router(market_embed_router)
 install_discovery_compat(app)
 
 if __name__ == "__main__":
