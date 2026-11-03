@@ -160,13 +160,14 @@ jobs:
               records=index.get("results")
               if isinstance(records,list) and any(
                   isinstance(item,dict)
-                  and (item.get("protocols") or {}).get("mcp")==
+                  and isinstance(item.get("protocols"),dict)
+                  and item["protocols"].get("mcp")==
                        "https://aimarket-997u.onrender.com/mcp"
                   for item in records):
                   leads.append(("AI MARKET: confirmed independent jishie directory listing",
                       "The free jishie search API returned the exact public "
                       "AI Market MCP endpoint. Check the current source: "
-                      "https://jishie.com/v1/agents?q=AI%20Market%26include_unprobed=true "
+                      "https://jishie.com/v1/agents?q=AI%20Market&include_unprobed=true "
                       " . A directory listing is not an external user, "
                       "merchant, funded transaction or revenue."))
                   print("JISHIE_EXACT_MCP_LISTING_FOUND")
