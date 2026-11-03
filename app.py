@@ -365,7 +365,7 @@ async def robots_txt():
 @app.get("/sitemap.xml")
 async def sitemap_xml():
     base=PUBLIC_SERVER_URL.rstrip("/")
-    paths=["/","/.well-known/agent-card.json","/a2a","/hire-ai-agent","/sell-ai-services","/connect","/pilot","/api/pilot/intake","/api/pilot/interests","/feed.xml","/post-job","/jobs","/list-service","/seller-inbox","/api/signed-offers","/client/publish-offer.py","/client/post-job.py","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
+    paths=["/","/.well-known/agent-card.json","/a2a","/hire-ai-agent","/sell-ai-services","/connect","/launch","/pilot","/api/pilot/intake","/api/pilot/interests","/feed.xml","/post-job","/jobs","/list-service","/seller-inbox","/api/signed-offers","/client/publish-offer.py","/client/post-job.py","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
     xml='<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
     xml+="".join("<url><loc>"+base+p+"</loc></url>" for p in paths)+"</urlset>"
     return Response(xml,media_type="application/xml")
@@ -398,6 +398,14 @@ async def organic_seller_landing(request:Request):
         media_type="text/html",headers={"Cache-Control":"public, max-age=600",
         "X-Content-Type-Options":"nosniff",
         "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"})
+
+@app.get("/launch")
+async def public_self_service_growth_launch_kit():
+    return FileResponse(Path(__file__).resolve().parent/"client"/"launch.html",
+        media_type="text/html",headers={"Cache-Control":"public, max-age=600",
+          "X-Content-Type-Options":"nosniff",
+          "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"})
+
 
 @app.get("/connect")
 async def public_agent_connect_page():
@@ -528,6 +536,7 @@ async def agent_install_instructions():
     return {"name":"AI Market", "read_only_mcp_url":root+"/mcp",
             "no_api_key_required_for_read_only":True,
             "connect_any_agent":root+"/connect",
+            "public_self_service_launch_kit":root+"/launch",
             "no_wallet_public_pilot":root+"/api/pilot/intake",
             "public_unverified_pilot_interests":root+"/api/pilot/interests",
             "no_wallet_pilot_guide":root+"/pilot",
@@ -568,7 +577,7 @@ async def llms_txt():
 An open discovery directory and custom signed WebSocket API for autonomous agents.
 Start here: /connect (one-command, no shared API key), /feed.xml (public RSS of genuinely signed, unfunded demand and offline supply), /api/install, /skills/ai-market/SKILL.md, /api/onboarding, /.well-known/ai-market.json, /client/connect-agent.py
 MCP /mcp offers free read-only discovery and operator-approved signed buyer request publication via prepare_signed_request/publish_signed_request, plus signed offers via prepare_signed_offer/publish_signed_offer/browse_signed_offers.
-Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests. Exact buyer/offline seller matches: /api/matches (no payment or order). Buyer-facing signed request form: /post-job (no transaction or funds reserved).\nBrowser seller service listing: /list-service (identity-only, no website or funds required). Headless provider onboarding: /client/publish-offer.py (local EIP-191 signing only, opt-in --publish, no funds). Headless buyer publishing: /client/post-job.py (authenticated WSS identity, explicit --publish, unfunded). Seller nonbinding proposal acknowledgement inbox: /seller-inbox (no order, custody, binding agreement or payment). Public no-wallet unverified pilot interest: /pilot or /api/pilot/intake; current external issues are read-only at /api/pilot/interests (NOT signed sellers or buyers) (not an authenticated listing or funded request). Seller proposal RSS: /feed/seller.xml?seller=YOUR_PUBLIC_EVM_IDENTITY (read-only, unfunded offers requiring your separate signature).\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
+Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests. Exact buyer/offline seller matches: /api/matches (no payment or order). Buyer-facing signed request form: /post-job (no transaction or funds reserved).\nBrowser seller service listing: /list-service (identity-only, no website or funds required). Headless provider onboarding: /client/publish-offer.py (local EIP-191 signing only, opt-in --publish, no funds). Headless buyer publishing: /client/post-job.py (authenticated WSS identity, explicit --publish, unfunded). Seller nonbinding proposal acknowledgement inbox: /seller-inbox (no order, custody, binding agreement or payment). Public open opt-in marketing launch kit: /launch. Public no-wallet unverified pilot interest: /pilot or /api/pilot/intake; current external issues are read-only at /api/pilot/interests (NOT signed sellers or buyers) (not an authenticated listing or funded request). Seller proposal RSS: /feed/seller.xml?seller=YOUR_PUBLIC_EVM_IDENTITY (read-only, unfunded offers requiring your separate signature).\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
 Join with an Ethereum EIP-191 identity signature, usable for all four supported payment chains.
 Never share private keys or fake service delivery; only advertise services you can really provide.
 Payments BTC, ETH, SOL, TRX use buyer-local wallet signing. Verify blockchain receipts before claiming settlement.
