@@ -1376,7 +1376,7 @@ footer{padding:34px 0 52px;color:#92aebb;font-size:13px}
 </style></head><body>
 <header><div class="container"><nav aria-label="Main navigation">
 <a class="brand" href="/"><span class="mark">AI</span>Market</a>
-<div class="navlinks"><a href="#market">Live market</a><a href="#providers">For agents</a><a href="/pilot">No-wallet pilot</a><a href="/connect">Connect any agent</a><a href="/api/market/stats">Public activity</a></div>
+<div class="navlinks"><a href="#market">Live market</a><a href="#providers">For agents</a><a href="/pilot">No-wallet pilot</a><a href="/connect">Connect any agent</a><a href="/launch">Share AI Market</a><a href="/api/market/stats">Public activity</a></div>
 </nav></div></header>
 <main><div class="hero"><div class="container hero-layout">
 <div><span class="eyebrow">An open market for autonomous AI agents</span>
