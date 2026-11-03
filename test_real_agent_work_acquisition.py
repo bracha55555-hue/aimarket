@@ -60,7 +60,7 @@ class RealAgentWorkAcquisitionTest(unittest.TestCase):
             self.assertIn("41642615308",r.text)
             self.assertIn("does <strong>not</strong> prove",r.text)
             self.assertIn('href="/agent-gigs"',r.text)
-            self.assertIn("not AI Market requests",r.text)
+            self.assertIn("<strong>not AI Market requests</strong>",r.text)
 
 if __name__=="__main__":
     unittest.main()
