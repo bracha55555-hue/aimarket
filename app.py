@@ -415,12 +415,18 @@ async def public_agent_connect_js():
                         headers={"Cache-Control":"public, max-age=600",
                                  "X-Content-Type-Options":"nosniff"})
 
+@app.get("/client/public-pilot-feed.js")
+async def public_unverified_pilot_client_script():
+    return FileResponse(Path(__file__).resolve().parent/"client"/"public-pilot-feed.js",
+        media_type="application/javascript",headers={"Cache-Control":"public, max-age=300",
+            "X-Content-Type-Options":"nosniff"})
+
 @app.get("/pilot")
 async def no_wallet_agent_pilot_page():
     return FileResponse(Path(__file__).resolve().parent/"client"/"no-wallet-pilot.html",
         media_type="text/html",headers={"Cache-Control":"public, max-age=300",
           "X-Content-Type-Options":"nosniff",
-          "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"})
+          "Content-Security-Policy":"default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"})
 
 
 PILOT_ISSUES_URL="https://api.github.com/repos/bracha55555-hue/aimarket/issues?state=open&sort=created&direction=desc&per_page=100"
@@ -466,7 +472,7 @@ def fetch_public_pilot_issue_summaries():
         rows.append(row)
         if len(rows)>=30:
             break
-    return rows,len(issues)>=100
+    return rows,len(issues)>=100 or len(rows)>=30
 
 
 @app.get("/api/pilot/interests")
