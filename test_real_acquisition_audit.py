@@ -25,6 +25,18 @@ class RealBusinessAcquisitionEvidenceAuditTest(unittest.TestCase):
         self.assertNotIn("email_address",workflow)
         self.assertNotIn("private_key",workflow)
 
+    def test_partner_followup_and_directory_tracking_require_real_source_evidence(self):
+        watcher=Path(".github/workflows/first-independent-lead-watch.yml").read_text("utf-8")
+        self.assertIn('(34,6598342756,"dserretti13","Humesh A2A/MCP collaboration")',watcher)
+        self.assertIn('(14,6598306029,"robertwmccarty-caelum","Linked AIs/BuddyLists interop")',watcher)
+        self.assertIn('index=get("https://jishie.com/v1/agents?q=AI%20Market&include_unprobed=true")',watcher)
+        self.assertIn('item["protocols"].get("mcp")==',watcher)
+        self.assertIn('"https://aimarket-997u.onrender.com/mcp"',watcher)
+        self.assertIn("JISHIE_INDEXING_NOT_CONFIRMED",watcher)
+        self.assertIn("not a funded",watcher)
+        self.assertIn("LEAD_ALREADY_RECORDED",watcher)
+        self.assertNotIn("create_fake_listing",watcher)
+
     def test_existing_scheduled_audit_only_reads_public_outreach_and_production(self):
         audit=Path(".github/workflows/market-live-audit.yml").read_text("utf-8")
         self.assertIn('"production_agent_connect_guide"',audit)
