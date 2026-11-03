@@ -129,6 +129,49 @@ jobs:
               print("EXTERNAL_VIREO_PROVIDER_REPLIES",len(replies))
           else:
               print("EXTERNAL_VIREO_PROVIDER_REPLIES_UNKNOWN")
+          # Existing relevant independent, explicitly opt-in cross-operator replies.
+          # Only source-specific author comments AFTER our last operator reply count.
+          for topic,cutoff,external,kind in (
+                (34,6598342756,"dserretti13","Humesh A2A/MCP collaboration"),
+                (14,6598306029,"robertwmccarty-caelum","Linked AIs/BuddyLists interop")):
+              recent=get(API+"/issues/"+str(topic)+"/comments?per_page=100",github=True)
+              if not isinstance(recent,list):
+                  print("INDEPENDENT_PARTNER_REPLIES_UNKNOWN",topic)
+                  continue
+              new=[x for x in recent if isinstance(x,dict)
+                  and isinstance(x.get("id"),int) and x["id"]>cutoff
+                  and isinstance(x.get("user"),dict)
+                  and x["user"].get("login")==external]
+              print("INDEPENDENT_PARTNER_REPLIES",topic,len(new))
+              for reply in sorted(new,key=lambda q:q["id"],reverse=True)[:3]:
+                  ident=reply["id"]
+                  leads.append(("AI MARKET: "+kind+" external reply #"+str(ident),
+                      "A prior interested independent operator replied after our concrete "
+                      "public-only interoperability proposal. Review the original source: "
+                      "https://github.com/bracha55555-hue/aimarket/issues/"+
+                      str(topic)+"#issuecomment-"+str(ident)+
+                      " . This is an unverified collaboration signal, not a funded "
+                      "order, signed provider, completed task, endorsed product or sale. "
+                      "No external content or private contact details copied."))
+          # Jishie accepted a free submission with HTTP 202. The public index may
+          # publish it later; search read-only and only notify on an exact MCP match.
+          index=get("https://jishie.com/v1/agents?q=AI%20Market&include_unprobed=true")
+          if isinstance(index,dict):
+              records=index.get("results")
+              if isinstance(records,list) and any(
+                  isinstance(item,dict)
+                  and (item.get("protocols") or {}).get("mcp")==
+                       "https://aimarket-997u.onrender.com/mcp"
+                  for item in records):
+                  leads.append(("AI MARKET: confirmed independent jishie directory listing",
+                      "The free jishie search API returned the exact public "
+                      "AI Market MCP endpoint. Check the current source: "
+                      "https://jishie.com/v1/agents?q=AI%20Market%26include_unprobed=true "
+                      " . A directory listing is not an external user, "
+                      "merchant, funded transaction or revenue."))
+                  print("JISHIE_EXACT_MCP_LISTING_FOUND")
+              else: print("JISHIE_INDEXING_NOT_CONFIRMED")
+          else: print("JISHIE_DIRECTORY_READ_UNAVAILABLE")
           m=get("https://aimarket-997u.onrender.com/api/market/stats")
           if isinstance(m,dict):
               offers=int(m.get("signed_offline_offers") or 0)
