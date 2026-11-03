@@ -14,6 +14,17 @@ class RealBusinessAcquisitionEvidenceAuditTest(unittest.TestCase):
             self.assertIn("claude mcp add --transport http",resp.text)
             self.assertFalse(c.get("/health").json()["escrow"])
 
+    def test_first_real_provider_followup_is_only_external_respondent_and_never_a_sale(self):
+        workflow=Path(".github/workflows/first-independent-lead-watch.yml").read_text("utf-8")
+        self.assertIn('API+"/issues/76/comments?per_page=100"',workflow)
+        self.assertIn('c["id"]>6597925653',workflow)
+        self.assertIn('c["user"].get("login")=="vireo-agent"',workflow)
+        self.assertIn("This is a public business lead, NOT acceptance of a purchase",workflow)
+        self.assertIn("EXTERNAL_VIREO_PROVIDER_REPLIES",workflow)
+        self.assertIn("LEAD_ALREADY_RECORDED",workflow)
+        self.assertNotIn("email_address",workflow)
+        self.assertNotIn("private_key",workflow)
+
     def test_existing_scheduled_audit_only_reads_public_outreach_and_production(self):
         audit=Path(".github/workflows/market-live-audit.yml").read_text("utf-8")
         self.assertIn('"production_agent_connect_guide"',audit)
