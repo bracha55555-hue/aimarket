@@ -33,6 +33,8 @@ jobs:
         run: python -m unittest -v test_a2a_discovery.py
       - name: Verify actual first-buyer conversion CTAs never imply authenticated or paid work
         run: python -m unittest -v test_buyer_marketing_conversion.py
+      - name: Verify one-time free directory launch wave and opt-in organic share kit
+        run: python -m unittest -v test_organic_marketing_distribution.py
       - name: Verify public role-specific organic buyer and provider landing pages
         run: python -m unittest -v test_organic_landing.py
       - name: Verify business homepage shows real market state and safely escapes untrusted offers
