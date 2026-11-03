@@ -33,6 +33,8 @@ jobs:
         run: python -m unittest -v test_a2a_discovery.py
       - name: Verify actual first-buyer conversion CTAs never imply authenticated or paid work
         run: python -m unittest -v test_buyer_marketing_conversion.py
+      - name: Verify AgentSearch alternate URL once after original HTTP 400
+        run: python -m unittest -v test_agentsearch_corrected_once.py
       - name: Verify high-reach third-party agent directory submissions are genuine and noncommercial
         run: python -m unittest -v test_verified_directory_wave.py
       - name: Verify one-time free directory launch wave and opt-in organic share kit
