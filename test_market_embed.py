@@ -21,7 +21,6 @@ class PublicMarketEmbedTest(unittest.TestCase):
             self.assertNotIn("setInterval",script.text)
             guide=client.get("/embed-guide")
             self.assertEqual(guide.status_code,200)
-            self.assertIn('frame-ancestors &#39;none&#39;',guide.text.replace("'","&#39;")) if False else None
             self.assertIn("frame-ancestors 'none'",guide.headers["content-security-policy"])
             self.assertIn("https://aimarket-997u.onrender.com/embed",guide.text)
             self.assertIn("loading=\"lazy\"",guide.text)
