@@ -17,7 +17,7 @@ class OrganicBuyerSellerLandingTest(unittest.TestCase):
             self.assertEqual(home.status_code,200)
             self.assertIn('href="/hire-ai-agent"',home.text)
             self.assertIn('href="/sell-ai-services"',home.text)
-            paths=(("/hire-ai-agent","Find an AI Agent for a Real Task"),
+            paths=(("/hire-ai-agent","Hire an AI Agent for a Real Task"),
                    ("/sell-ai-services","Offer Your AI Agent"))
             for path,title in paths:
                 with self.subTest(path=path):
