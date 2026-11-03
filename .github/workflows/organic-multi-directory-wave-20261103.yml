@@ -1,0 +1,162 @@
+name: One-time organic AI agent distribution wave (reviewable free directories)
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/organic-multi-directory-wave-20261103.yml
+permissions:
+  contents: read
+jobs:
+  postlaunchkit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - name: Check exact deployed main and submit one genuine product to PostLaunchKit
+        env:
+          EXPECTED_MAIN_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json,os,time,urllib.request,urllib.error
+          origin="https://aimarket-997u.onrender.com"
+          api="https://postlaunchkit.com/api/v1"
+          headers={"User-Agent":"AI-Market-Operator-Reviewable-Free-Launch/1.0 (+https://github.com/bracha55555-hue/aimarket)",
+                   "Accept":"application/json"}
+          def get(url):
+              req=urllib.request.Request(url,headers=headers)
+              with urllib.request.urlopen(req,timeout=25) as response:
+                  if response.status!=200: raise ValueError("non-200 response")
+                  raw=response.read(180001)
+              if len(raw)>180000:raise ValueError("response oversized")
+              return json.loads(raw.decode("utf-8"))
+          for attempt in range(35):
+              try:
+                  health=get(origin+"/health")
+                  if health.get("deployed_git_sha")!=os.environ["EXPECTED_MAIN_SHA"]:
+                      raise ValueError("exact main SHA not deployed")
+                  card=get(origin+"/.well-known/agent-card.json")
+                  if not any(isinstance(i,dict) and i.get("url")==origin+"/a2a"
+                             and i.get("protocolVersion")=="1.0"
+                             for i in card.get("supportedInterfaces",[])):
+                      raise ValueError("claimed A2A discovery is not live")
+                  print("EXACT_MAIN_DEPLOYED",health["deployed_git_sha"])
+                  break
+              except (ValueError,OSError,KeyError,TypeError,TimeoutError) as exc:
+                  print("AWAIT_LIVE_REVISION",attempt+1,type(exc).__name__)
+                  if attempt==34:raise RuntimeError("No submission without verified live public capabilities")
+                  time.sleep(8)
+          try:
+              current=get(api+"/projects?q=AI%20Market&category=developer")
+              results=current.get("results") if isinstance(current,dict) else None
+              if isinstance(results,list) and any(isinstance(x,dict)
+                  and (x.get("url") or "").rstrip("/")==origin for x in results):
+                  print("POSTLAUNCHKIT_ALREADY_PUBLIC_SKIP_DUPLICATE")
+                  raise SystemExit(0)
+          except (ValueError,OSError,KeyError,TypeError,TimeoutError):
+              print("PUBLIC_SEARCH_UNAVAILABLE_DO_NOT_ASSUME_NO_DUPLICATE")
+              raise
+          payload={"name":"AI Market",
+              "url":origin,
+              "one_liner":"Free public MCP and A2A discovery for independent AI services, real signed offers and genuine buyer tasks.",
+              "why_try":"Explore current real supply and demand without a key. AI agents without EIP-191 can introduce one genuine public, unverified provider or buyer task through an opt-in GitHub pilot. Empty catalogs are shown honestly; no escrow, confirmed sellers or guaranteed earnings.",
+              "category":"developer",
+              "tags":["mcp","ai-agents","a2a","open-source"],
+              "pricing":"Free discovery; 2% only on eligible independently verified crypto settlements",
+              "agent_name":"AI Market operator"}
+          req=urllib.request.Request(api+"/submit",method="POST",
+                   data=json.dumps(payload,separators=(",",":"),sort_keys=True).encode("utf-8"),
+                   headers={**headers,"Content-Type":"application/json"})
+          try:
+              with urllib.request.urlopen(req,timeout=35) as response:
+                  status=response.status
+                  raw=response.read(15001)
+          except urllib.error.HTTPError as error:
+              status=error.code
+              raw=error.read(6000)
+          print("POSTLAUNCHKIT_REVIEW_SUBMISSION_HTTP",status)
+          if status==409:
+              print("POSTLAUNCHKIT_EXISTING_SUBMISSION_NO_RETRY; no new listing claimed")
+              raise SystemExit(0)
+          if status!=202:
+              raise RuntimeError("No acceptance proof; do not claim listing, traffic or revenue")
+          try:
+              receipt=json.loads(raw.decode("utf-8"))
+          except (ValueError,UnicodeDecodeError):
+              raise RuntimeError("HTTP 202 but receipt could not be verified")
+          if receipt.get("status")!="pending_review":
+              raise RuntimeError("Unexpected review state; no acceptance claim")
+          ident=receipt.get("id")
+          if isinstance(ident,(str,int)) and len(str(ident))<100:
+              print("POSTLAUNCHKIT_REVIEW_ID",ident)
+          print("POSTLAUNCHKIT_ACCEPTED_PENDING_HUMAN_REVIEW_NOT_PUBLIC_YET")
+          print("No private credentials, fake users, invented signed offers, orders or payments.")
+          PY
+  wingman:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - name: Check exact deployed main and submit one real hosted MCP to WingMan
+        env:
+          EXPECTED_MAIN_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json,os,time,urllib.request,urllib.error
+          root="https://aimarket-997u.onrender.com"
+          endpoint="https://wingmanprotocol.com/submit"
+          headers={"User-Agent":"AI-Market-Operator-Reviewable-Free-MCP-Discovery/1.0 (+https://github.com/bracha55555-hue/aimarket)",
+                   "Accept":"application/json"}
+          def get(url):
+              with urllib.request.urlopen(urllib.request.Request(url,headers=headers),timeout=25) as r:
+                  if r.status!=200:raise ValueError("non-200 source")
+                  content=r.read(180001)
+              if len(content)>180000:raise ValueError("oversized source")
+              return json.loads(content.decode("utf-8"))
+          for attempt in range(35):
+              try:
+                  actual=get(root+"/health")
+                  if actual.get("deployed_git_sha")!=os.environ["EXPECTED_MAIN_SHA"]:
+                      raise ValueError("exact current main not live")
+                  info=get(root+"/api/install")
+                  if info.get("read_only_mcp_url")!=root+"/mcp" or info.get("no_api_key_required_for_read_only") is not True:
+                      raise ValueError("advertised keyless MCP feature not verified")
+                  print("EXACT_MAIN_DEPLOYED",actual["deployed_git_sha"])
+                  break
+              except (ValueError,OSError,KeyError,TypeError,TimeoutError) as e:
+                  print("AWAIT_LIVE_REVISION",attempt+1,type(e).__name__)
+                  if attempt==34:raise RuntimeError("No external submission without exact live revision")
+                  time.sleep(8)
+          payload={"name":"AI Market MCP",
+                   "kind":"mcp-server",
+                   "url":root+"/mcp",
+                   "repo_url":"https://github.com/bracha55555-hue/aimarket",
+                   "description":"Hosted no-key read-only discovery of genuine AI agent service listings and actual buyer needs; optional operator-approved signed identity publishing. Empty supply or demand is shown honestly. No guaranteed work, escrow or automatic payment.",
+                   "categories":["developer-tools","ai","marketplace"],
+                   "maker_name":"AI Market operator",
+                   "maker_url":"https://github.com/bracha55555-hue",
+                   "website_url":root,
+                   "docs_url":root+"/connect"}
+          req=urllib.request.Request(endpoint,method="POST",
+                    data=json.dumps(payload,separators=(",",":"),sort_keys=True).encode(),
+                    headers={**headers,"Content-Type":"application/json"})
+          try:
+              with urllib.request.urlopen(req,timeout=35) as response:
+                  status=response.status
+                  raw=response.read(12001)
+          except urllib.error.HTTPError as error:
+              status=error.code
+              raw=error.read(3000)
+          print("WINGMAN_SINGLE_MCP_SUBMISSION_HTTP",status)
+          if status not in (200,201,202,409):
+              raise RuntimeError("WingMan has not confirmed acceptance; do not claim public listing")
+          if status==409:
+              print("WINGMAN_DUPLICATE_OR_CONFLICT_NOT_NEW_ADOPTION")
+          else:
+              # Do not log external untrusted full response: it may contain a claim token.
+              try:
+                  data=json.loads(raw.decode("utf-8"))
+                  state=data.get("status")
+                  if isinstance(state,str):print("WINGMAN_NONSECRET_REVIEW_STATE",state[:55])
+              except (ValueError,UnicodeDecodeError,AttributeError):
+                  print("WINGMAN_NONJSON_PUBLIC_RECEIPT")
+              print("WINGMAN_ACCEPTED_FOR_REVIEW_NOT_PROOF_OF_PUBLIC_LISTING")
+          print("No keys, unsolicited messages, payments, invented users, buyer tasks or repeat posts.")
+          PY
