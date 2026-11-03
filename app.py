@@ -3457,5 +3457,8 @@ async def agent_registry_endpoint(websocket: WebSocket):
                     active_agents.pop(agent_id, None)
                     agent_profiles.pop(agent_id, None)
 
+from discovery_compat import install_discovery_compat
+install_discovery_compat(app)
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "7860")))
