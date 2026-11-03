@@ -1,0 +1,48 @@
+name: One-time real AI Market submission to three independent agent directories
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/verified-directory-wave-20261103.yml
+permissions:
+  contents: read
+jobs:
+  agentsearch:
+    name: AgentSearch free A2A card submission
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify current live main then submit one real agent card
+        env:
+          EXPECTED_MAIN_SHA: ${{ github.sha }}
+        run: python3 scripts/verified_directory_wave.py agentsearch
+  a2a:
+    name: A2A Registry public scan and exact agent submission
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Validate live card then submit one unclaimed genuine directory listing
+        env:
+          EXPECTED_MAIN_SHA: ${{ github.sha }}
+        run: python3 scripts/verified_directory_wave.py a2a
+  claudecodeagents:
+    name: Claude Code Agents real MCP server listing
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify public MCP and official schema then submit
+        env:
+          EXPECTED_MAIN_SHA: ${{ github.sha }}
+        run: python3 scripts/verified_directory_wave.py claudecodeagents
