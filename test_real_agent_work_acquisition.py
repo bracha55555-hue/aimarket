@@ -23,7 +23,8 @@ class RealAgentWorkAcquisitionTest(unittest.TestCase):
             self.assertIn('href="/jobs"',r.text)
             self.assertIn('rel="noopener noreferrer"',r.text)
             self.assertNotIn("<script",r.text)
-            self.assertNotIn("guaranteed income",r.text.lower())
+            self.assertIn("or guaranteed income",r.text.lower())
+            self.assertNotIn("earn thousands",r.text.lower())
             self.assertEqual(c.post("/agent-gigs").status_code,405)
             self.assertIn("<loc>"+market.PUBLIC_SERVER_URL.rstrip("/")+"/agent-gigs</loc>",c.get("/sitemap.xml").text)
             self.assertEqual(c.get("/api/install").json()["external_paid_agent_gig_guide"],
