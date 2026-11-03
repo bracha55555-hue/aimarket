@@ -1,0 +1,67 @@
+name: Verify genuine independent no-wallet pilot discovery in production (one time)
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/verify-real-pilot-production-20261103.yml
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - name: Check the exact live Git revision and independently posted public issue metadata
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json,os,time,urllib.request,urllib.error
+          root="https://aimarket-997u.onrender.com"
+          expected=os.environ["EXPECTED_SHA"]
+          assert len(expected)==40
+          def get(path):
+              request=urllib.request.Request(root+path,headers={
+                  "User-Agent":"AI-Market-Official-Business-Audit/1.0",
+                  "Accept":"application/json"})
+              with urllib.request.urlopen(request,timeout=22) as response:
+                  if response.status!=200:
+                      raise ValueError("Non-200 production read")
+                  return json.loads(response.read(700000).decode("utf-8"))
+          for attempt in range(39):
+              try:
+                  health=get("/health")
+                  if health.get("deployed_git_sha")!=expected:
+                      raise ValueError("Current Render deployment does not match exact main SHA")
+                  pilot=get("/api/pilot/interests")
+                  if pilot.get("source_status")!="cached_public_github_read":
+                      raise ValueError("Pilot index upstream is not verified")
+                  if pilot.get("signed_marketplace_records") is not False or pilot.get("can_accept_trades") is not False:
+                      raise ValueError("Pilot interest incorrectly claims authenticated trade ability")
+                  interests=pilot.get("interests")
+                  if not isinstance(interests,list):
+                      raise ValueError("Public pilot source not a real list")
+                  source=[v for v in interests if isinstance(v,dict) and
+                      v.get("issue_number")==76 and v.get("github_author")=="vireo-agent" and
+                      v.get("kind")=="provider" and
+                      v.get("url")=="https://github.com/bracha55555-hue/aimarket/issues/76"]
+                  if not source:
+                      raise ValueError("Independent public provider issue #76 not visible in market's pilot index")
+                  item=source[0]
+                  if item.get("funded") is not False or item.get("identity_verified_by_marketplace") is not False:
+                      raise ValueError("Unverified issue was upgraded to a false sale/identity")
+                  stats=get("/api/market/stats")
+                  print("VERIFIED_EXACT_LIVE_SHA",expected)
+                  print("VERIFIED_INDEPENDENT_PUBLIC_PILOT_ISSUE",item["issue_number"],item["github_author"])
+                  print("PUBLIC_GITHUB_PILOT_INTEREST_COUNT",pilot["count"])
+                  print("SIGNED_OFFERS_SEPARATE",stats["signed_offline_offers"])
+                  print("REAL_SIGNED_BUYER_REQUESTS_SEPARATE",stats["open_verified_buyer_requests"])
+                  print("VERIFIED_SETTLEMENTS",stats["events_since_start"]["settlements_verified"])
+                  print("NO_PILOT_RECORD_IMPORTED_INTO_SIGNED_MARKET; no external writes, credentials or payments")
+                  break
+              except (OSError,ValueError,KeyError,TypeError,TimeoutError) as exc:
+                  print("AWAIT_REAL_LIVE_PUBLIC_PILOT",attempt+1,type(exc).__name__)
+                  if attempt==38:
+                      raise RuntimeError("Live revision and independent issue inclusion were not verified")
+                  time.sleep(8)
+          PY
