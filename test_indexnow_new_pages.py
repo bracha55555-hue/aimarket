@@ -28,6 +28,8 @@ class SearchIndexNotificationTest(unittest.TestCase):
         self.assertIn("EXPECTED_SHA",workflow)
         self.assertIn('"keyLocation":root+"/"+key+".txt"',workflow)
         self.assertIn('"/hire-ai-agent","/sell-ai-services"',workflow)
+        self.assertIn('"/launch","/pilot"',workflow)
+        self.assertIn("INDEXNOW_NOTIFIED_ONLY",workflow)
         self.assertNotIn("schedule:",workflow)
 
 if __name__=="__main__":
