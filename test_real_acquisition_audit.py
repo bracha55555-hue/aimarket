@@ -49,6 +49,19 @@ class RealBusinessAcquisitionEvidenceAuditTest(unittest.TestCase):
         self.assertIn("LEAD_ALREADY_RECORDED",watcher)
         self.assertNotIn("auto_send_payment",watcher)
 
+    def test_free_mass_directory_approval_is_read_from_exact_original_receipt(self):
+        watcher=Path(".github/workflows/first-independent-lead-watch.yml").read_text("utf-8")
+        self.assertIn('pk_id="d4670710-53fe-4205-8e3e-207f4849377b"',watcher)
+        self.assertIn('pk=get("https://postlaunchkit.com/api/v1/submissions/"+pk_id)',watcher)
+        self.assertIn('state=="approved"',watcher)
+        self.assertIn('"https://postlaunchkit.com/directory/"',watcher)
+        self.assertIn("POSTLAUNCHKIT_NOT_PUBLICLY_APPROVED",watcher)
+        self.assertIn("POSTLAUNCHKIT_REVIEW_STATUS_UNAVAILABLE",watcher)
+        self.assertIn("NOT a customer",watcher)
+        self.assertIn("LEAD_ALREADY_RECORDED",watcher)
+        self.assertNotIn("buy_boost",watcher)
+        self.assertNotIn("store_private_token",watcher)
+
     def test_existing_scheduled_audit_only_reads_public_outreach_and_production(self):
         audit=Path(".github/workflows/market-live-audit.yml").read_text("utf-8")
         self.assertIn('"production_agent_connect_guide"',audit)

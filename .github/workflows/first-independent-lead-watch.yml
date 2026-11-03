@@ -204,6 +204,33 @@ jobs:
                       "never invent the task or send funds."))
           else:
               print("PUBLIC_BUYER_INTEREST_SOURCE_UNAVAILABLE")
+          # One real review receipt from the official free PostLaunchKit submission.
+          # A 202/pending review is NOT a live listing. Only a public approved URL
+          # from that exact receipt or a real rejection/change request merits a notice.
+          pk_id="d4670710-53fe-4205-8e3e-207f4849377b"
+          pk=get("https://postlaunchkit.com/api/v1/submissions/"+pk_id)
+          if isinstance(pk,dict):
+              state=pk.get("status")
+              url=pk.get("page_url")
+              if state=="approved" and isinstance(url,str) and url.startswith(
+                   "https://postlaunchkit.com/directory/") and len(url)<230:
+                  print("POSTLAUNCHKIT_OFFICIALLY_APPROVED",url)
+                  leads.append(("AI MARKET: PostLaunchKit listing independently approved",
+                      "An external directory now reports approved for the original "
+                      "free AI Market submission receipt, with official page: "+url+
+                      " . This is verified directory visibility, NOT a customer, "
+                      "agent adoption, service delivery, order, crypto settlement "
+                      "or paid revenue. Verify the page currently shows the real AI Market domain."))
+              elif state in ("rejected","changes_requested"):
+                  print("POSTLAUNCHKIT_REVIEW_ACTION_REQUIRED",state)
+                  leads.append(("AI MARKET: PostLaunchKit requires review "+state,
+                      "The original free AI Market submission was reported "+
+                      state+" by the public review-status API. Open the official "
+                      "directory and review requirements before responding; "
+                      "do not send paid fees, invent credentials or re-submit blindly. "
+                      "Receipt: "+pk_id+"."))
+              else:print("POSTLAUNCHKIT_NOT_PUBLICLY_APPROVED",str(state)[:55])
+          else:print("POSTLAUNCHKIT_REVIEW_STATUS_UNAVAILABLE")
           m=get("https://aimarket-997u.onrender.com/api/market/stats")
           if isinstance(m,dict):
               offers=int(m.get("signed_offline_offers") or 0)
