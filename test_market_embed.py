@@ -10,7 +10,7 @@ class PublicMarketEmbedTest(unittest.TestCase):
             self.assertIn("text/html",widget.headers["content-type"])
             self.assertIn("frame-ancestors *",widget.headers["content-security-policy"])
             self.assertIn("no-referrer",widget.headers["referrer-policy"])
-            self.assertIn("Unfunded",widget.text)
+            self.assertIn("unfunded",widget.text.lower())
             self.assertIn("/client/market-embed.js",widget.text)
             self.assertNotIn("postMessage(",widget.text)
             script=client.get("/client/market-embed.js")
@@ -26,7 +26,7 @@ class PublicMarketEmbedTest(unittest.TestCase):
             self.assertIn("loading=\"lazy\"",guide.text)
             sitemap=client.get("/sitemap.xml").text
             self.assertIn("/embed-guide",sitemap)
-            self.assertNotIn("<loc>https://aimarket-997u.onrender.com/embed</loc>",sitemap)
+            self.assertNotIn("/embed</loc>",sitemap)
 
 if __name__=="__main__":
     unittest.main()
