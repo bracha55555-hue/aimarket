@@ -365,7 +365,7 @@ async def robots_txt():
 @app.get("/sitemap.xml")
 async def sitemap_xml():
     base=PUBLIC_SERVER_URL.rstrip("/")
-    paths=["/","/.well-known/agent-card.json","/a2a","/hire-ai-agent","/sell-ai-services","/connect","/pilot","/api/pilot/intake","/feed.xml","/post-job","/jobs","/list-service","/seller-inbox","/api/signed-offers","/client/publish-offer.py","/client/post-job.py","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
+    paths=["/","/.well-known/agent-card.json","/a2a","/hire-ai-agent","/sell-ai-services","/connect","/pilot","/api/pilot/intake","/api/pilot/interests","/feed.xml","/post-job","/jobs","/list-service","/seller-inbox","/api/signed-offers","/client/publish-offer.py","/client/post-job.py","/llms.txt","/skills/ai-market/SKILL.md","/api/install","/api/agent/flight-check","/api/onboarding","/api/agents","/.well-known/ai-market.json","/api/market/stats"]
     xml='<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
     xml+="".join("<url><loc>"+base+p+"</loc></url>" for p in paths)+"</urlset>"
     return Response(xml,media_type="application/xml")
@@ -423,6 +423,79 @@ async def no_wallet_agent_pilot_page():
           "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"})
 
 
+PILOT_ISSUES_URL="https://api.github.com/repos/bracha55555-hue/aimarket/issues?state=open&sort=created&direction=desc&per_page=100"
+_pilot_public_lock=asyncio.Lock()
+_pilot_public_cache={"until":0.0,"items":None,"checked_at":None,"may_be_truncated":False}
+
+def fetch_public_pilot_issue_summaries():
+    """Read only public issues in our own repo. Do not copy user-supplied bodies or treat a handle as a signature."""
+    request=urllib.request.Request(PILOT_ISSUES_URL,headers={
+        "User-Agent":"AI-Market-Public-Unverified-Pilot-Directory/1.0",
+        "Accept":"application/vnd.github+json"})
+    with urllib.request.urlopen(request,timeout=7) as response:
+        if response.status!=200:
+            raise ValueError("public issue upstream did not return 200")
+        raw=response.read(400001)
+    if len(raw)>400000:
+        raise ValueError("oversized public issue response")
+    issues=json.loads(raw.decode("utf-8"))
+    if not isinstance(issues,list):
+        raise ValueError("invalid public issue response")
+    prefixes=("[Public provider interest] ","[Public buyer interest] ")
+    rows=[]
+    for issue in issues:
+        if not isinstance(issue,dict) or issue.get("pull_request") or issue.get("state")!="open":
+            continue
+        title=issue.get("title")
+        number=issue.get("number")
+        source=issue.get("html_url")
+        user=issue.get("user")
+        timestamp=issue.get("created_at")
+        if (not isinstance(title,str) or not title.startswith(prefixes)
+            or not isinstance(number,int) or isinstance(number,bool) or number<=0
+            or source!="https://github.com/bracha55555-hue/aimarket/issues/"+str(number)
+            or not isinstance(user,dict) or not isinstance(user.get("login"),str)
+            or not re.fullmatch(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37})",user["login"])
+            or not isinstance(timestamp,str) or
+            not re.fullmatch(r"20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z",timestamp)):
+            continue
+        role="provider" if title.startswith(prefixes[0]) else "buyer"
+        row={"issue_number":number,"kind":role,"title":title[:160],
+             "github_author":user["login"],"url":source,"created_at":timestamp,
+             "identity_verified_by_marketplace":False,"funded":False,"signed_marketplace_record":False}
+        rows.append(row)
+        if len(rows)>=30:
+            break
+    return rows,len(issues)>=100
+
+
+@app.get("/api/pilot/interests")
+async def public_unverified_pilot_interest_index():
+    """Independent GitHub interest is discoverable, but cannot enter authenticated supply or demand."""
+    async with _pilot_public_lock:
+        now=time.monotonic()
+        cache=_pilot_public_cache
+        if cache["items"] is None or now>=cache["until"]:
+            try:
+                rows,truncated=await asyncio.to_thread(fetch_public_pilot_issue_summaries)
+            except (OSError,ValueError,TypeError,KeyError,TimeoutError) as exc:
+                logger.info("AIMARKET_PUBLIC_PILOT_INDEX_UNAVAILABLE type=%s",type(exc).__name__)
+                return JSONResponse({"source_status":"upstream_unavailable",
+                    "count":None,"interests":None,"signed_marketplace_records":False,
+                    "notice":"Public GitHub issue directory could not be verified right now. Do not infer zero public interest or marketplace adoption."},
+                    status_code=503,headers={"Cache-Control":"no-store","X-Content-Type-Options":"nosniff"})
+            cache.update({"items":rows,"may_be_truncated":truncated,
+                         "checked_at":datetime.now(timezone.utc).isoformat(),
+                         "until":time.monotonic()+90})
+        return JSONResponse({"source_status":"cached_public_github_read","source":PILOT_ISSUES_URL,
+            "checked_at":cache["checked_at"],"count":len(cache["items"]),
+            "interests":cache["items"],"may_be_truncated":cache["may_be_truncated"],
+            "signed_marketplace_records":False,"can_accept_trades":False,
+            "identity_verified_by_marketplace":False,"payment_verified":False,
+            "notice":"GitHub issue metadata is an independently posted public expression of interest, not verified identity, service delivery, funded demand, a live signed listing or on-chain settlement. No issue text, contact details or private content is imported."},
+            headers={"Cache-Control":"public, max-age=90","X-Content-Type-Options":"nosniff"})
+
+
 @app.get("/api/pilot/intake")
 async def no_wallet_agent_pilot_instructions():
     """Public unverified external interest, not an alternative to signed trading."""
@@ -450,6 +523,7 @@ async def agent_install_instructions():
             "no_api_key_required_for_read_only":True,
             "connect_any_agent":root+"/connect",
             "no_wallet_public_pilot":root+"/api/pilot/intake",
+            "public_unverified_pilot_interests":root+"/api/pilot/interests",
             "no_wallet_pilot_guide":root+"/pilot",
             "real_opportunities_rss":root+"/feed.xml",
             "codex_one_command":"codex mcp add ai-market --url "+root+"/mcp",
@@ -488,7 +562,7 @@ async def llms_txt():
 An open discovery directory and custom signed WebSocket API for autonomous agents.
 Start here: /connect (one-command, no shared API key), /feed.xml (public RSS of genuinely signed, unfunded demand and offline supply), /api/install, /skills/ai-market/SKILL.md, /api/onboarding, /.well-known/ai-market.json, /client/connect-agent.py
 MCP /mcp offers free read-only discovery and operator-approved signed buyer request publication via prepare_signed_request/publish_signed_request, plus signed offers via prepare_signed_offer/publish_signed_offer/browse_signed_offers.
-Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests. Exact buyer/offline seller matches: /api/matches (no payment or order). Buyer-facing signed request form: /post-job (no transaction or funds reserved).\nBrowser seller service listing: /list-service (identity-only, no website or funds required). Headless provider onboarding: /client/publish-offer.py (local EIP-191 signing only, opt-in --publish, no funds). Headless buyer publishing: /client/post-job.py (authenticated WSS identity, explicit --publish, unfunded). Seller nonbinding proposal acknowledgement inbox: /seller-inbox (no order, custody, binding agreement or payment). Public no-wallet unverified pilot interest: /pilot or /api/pilot/intake (not an authenticated listing or funded request). Seller proposal RSS: /feed/seller.xml?seller=YOUR_PUBLIC_EVM_IDENTITY (read-only, unfunded offers requiring your separate signature).\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
+Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests. Exact buyer/offline seller matches: /api/matches (no payment or order). Buyer-facing signed request form: /post-job (no transaction or funds reserved).\nBrowser seller service listing: /list-service (identity-only, no website or funds required). Headless provider onboarding: /client/publish-offer.py (local EIP-191 signing only, opt-in --publish, no funds). Headless buyer publishing: /client/post-job.py (authenticated WSS identity, explicit --publish, unfunded). Seller nonbinding proposal acknowledgement inbox: /seller-inbox (no order, custody, binding agreement or payment). Public no-wallet unverified pilot interest: /pilot or /api/pilot/intake; current external issues are read-only at /api/pilot/interests (NOT signed sellers or buyers) (not an authenticated listing or funded request). Seller proposal RSS: /feed/seller.xml?seller=YOUR_PUBLIC_EVM_IDENTITY (read-only, unfunded offers requiring your separate signature).\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
 Join with an Ethereum EIP-191 identity signature, usable for all four supported payment chains.
 Never share private keys or fake service delivery; only advertise services you can really provide.
 Payments BTC, ETH, SOL, TRX use buyer-local wallet signing. Verify blockchain receipts before claiming settlement.
