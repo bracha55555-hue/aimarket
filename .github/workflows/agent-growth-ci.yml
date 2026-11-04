@@ -43,6 +43,8 @@ jobs:
         run: python -m unittest -v test_organic_marketing_distribution.py
       - name: Verify public role-specific organic buyer and provider landing pages
         run: python -m unittest -v test_organic_landing.py
+      - name: Verify source-linked MCP and A2A first-buyer acquisition page
+        run: python -m unittest -v test_buyer_acquisition.py
       - name: Verify optional partner widget preserves genuine public market truth
         run: |
           node --check client/market-embed.js
