@@ -1,0 +1,125 @@
+name: One-time independent A2A interoperability and new-page search discovery
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/real-interop-index-20261104.yml
+permissions:
+  contents: read
+jobs:
+  humesh_public_hello:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact public deployment and perform one authorized read-only Humesh hello
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import hashlib,json,os,time,urllib.request
+          root="https://aimarket-997u.onrender.com"
+          partner="https://humesh.netlify.app"
+          ua="AI-Market-Operator-Consent-Bounded-Interop/1.0"
+          def get(url,max_bytes=150000):
+              req=urllib.request.Request(url,headers={"User-Agent":ua,"Accept":"application/json"})
+              with urllib.request.urlopen(req,timeout=24) as r:
+                  if r.status!=200:raise RuntimeError("public discovery not 200")
+                  raw=r.read(max_bytes+1)
+              if len(raw)>max_bytes:raise RuntimeError("oversized public discovery")
+              return json.loads(raw),hashlib.sha256(raw).hexdigest()
+          for i in range(38):
+              try:
+                  health,_=get(root+"/health")
+                  if health.get("deployed_git_sha")!=os.environ["EXPECTED_SHA"]:
+                      raise RuntimeError("live revision does not match")
+                  home,_=get(root+"/.well-known/agent-card.json")
+                  if not any(isinstance(p,dict) and p.get("protocolBinding")=="JSONRPC"
+                          and p.get("protocolVersion")=="1.0" and p.get("url")==root+"/a2a"
+                          for p in home.get("supportedInterfaces",[])):
+                      raise RuntimeError("AI Market public A2A 1.0 card unavailable")
+                  print("CURRENT_LIVE_COMMIT_CONFIRMED",health["deployed_git_sha"])
+                  break
+              except (OSError,ValueError,RuntimeError,TimeoutError,KeyError) as e:
+                  print("AWAIT_EXACT_PRODUCTION",i+1,type(e).__name__)
+                  if i==37:raise
+                  time.sleep(8)
+          card,digest=get(partner+"/.well-known/agent-card.json")
+          if not any(isinstance(p,dict) and p.get("protocolBinding")=="JSONRPC"
+                     and p.get("protocolVersion")=="1.0" and p.get("url")==partner+"/a2a"
+                     for p in card.get("supportedInterfaces",[])):
+              raise RuntimeError("Humesh live A2A 1.0 interface not publicly declared")
+          print("INDEPENDENT_PARTNER_CARD_SHA256",digest)
+          # Exact read-only hello documented by independent operator in AI Market issue #34.
+          request={"jsonrpc":"2.0","id":"aimarket-humesh-public-hello-1",
+                   "method":"SendMessage","params":{"message":{
+                   "role":"ROLE_USER","messageId":"aimarket-readonly-hello-1",
+                   "parts":[{"text":json.dumps({"action":"hello"},separators=(",",":"))}]}}}
+          req=urllib.request.Request(partner+"/a2a",method="POST",
+                   data=json.dumps(request,separators=(",",":")).encode(),
+                   headers={"Content-Type":"application/json","Accept":"application/json",
+                            "A2A-Version":"1.0","User-Agent":ua})
+          with urllib.request.urlopen(req,timeout=30) as response:
+              status=response.status
+              raw=response.read(150001)
+          if status!=200 or len(raw)>150000:raise RuntimeError("Humesh hello unavailable")
+          payload=json.loads(raw)
+          if not isinstance(payload,dict) or payload.get("jsonrpc")!="2.0" or payload.get("error") is not None or not isinstance(payload.get("result"),dict):
+              raise RuntimeError("Invalid A2A result envelope")
+          print("HUMESH_READONLY_A2A_HTTP",status)
+          print("HUMESH_READONLY_A2A_SHA256",hashlib.sha256(raw).hexdigest())
+          print("HUMESH_PUBLIC_A2A_RESULT_KEYS",sorted(payload["result"].keys())[:12])
+          print("One authorized public hello; no private data, enrollment, invented buyer, payment or promise of partnership.")
+          PY
+  indexnow_embed_guide:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Submit only new indexable partner guide to official IndexNow
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json,os,time,urllib.request,urllib.error
+          root="https://aimarket-997u.onrender.com"
+          key="f37a1f8f9550946afe81256013058e21"
+          ua="AI-Market-Operator-New-Guide-IndexNow/1.0"
+          def read(path):
+              req=urllib.request.Request(root+path,headers={"User-Agent":ua})
+              with urllib.request.urlopen(req,timeout=25) as r:
+                  if r.status!=200:raise RuntimeError("public page not 200")
+                  raw=r.read(250001)
+              if len(raw)>250000:raise RuntimeError("oversized public page")
+              return raw.decode("utf-8","replace")
+          for i in range(38):
+              try:
+                  health=json.loads(read("/health"))
+                  if health.get("deployed_git_sha")!=os.environ["EXPECTED_SHA"]:
+                      raise RuntimeError("not deployed")
+                  guide=read("/embed-guide")
+                  sitemap=read("/sitemap.xml")
+                  if "<html" not in guide.lower() or "noindex" in guide.lower():
+                      raise RuntimeError("not indexable")
+                  if root+"/embed-guide" not in sitemap:
+                      raise RuntimeError("not in public sitemap")
+                  if read("/"+key+".txt").strip()!=key:
+                      raise RuntimeError("site ownership proof invalid")
+                  print("INDEXNOW_NEW_PAGE_LIVE_VERIFIED",root+"/embed-guide")
+                  break
+              except (OSError,ValueError,RuntimeError,TimeoutError) as e:
+                  print("AWAIT_EXACT_INDEXABLE_PAGE",i+1,type(e).__name__)
+                  if i==37:raise
+                  time.sleep(8)
+          packet={"host":"aimarket-997u.onrender.com","key":key,
+                  "keyLocation":root+"/"+key+".txt","urlList":[root+"/embed-guide"]}
+          req=urllib.request.Request("https://api.indexnow.org/indexnow",method="POST",
+                  data=json.dumps(packet,separators=(",",":")).encode(),
+                  headers={"User-Agent":ua,"Content-Type":"application/json; charset=utf-8"})
+          try:
+              with urllib.request.urlopen(req,timeout=35) as response:
+                  code=response.status
+          except urllib.error.HTTPError as exc:
+              code=exc.code
+          print("INDEXNOW_SINGLE_NEW_GUIDE_HTTP",code)
+          if code not in (200,202):raise RuntimeError("Not accepted by IndexNow")
+          print("Search engine receipt only; actual indexing, traffic, leads and customers are NOT verified.")
+          PY
