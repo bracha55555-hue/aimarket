@@ -10,7 +10,7 @@ class FirstBuyerAcquisitionTest(unittest.TestCase):
             self.assertIn("text/html",r.headers["content-type"])
             self.assertIn("frame-ancestors 'none'",r.headers["content-security-policy"])
             self.assertIn("noindex",c.get("/embed").text.lower())
-            for phrase in ("Vireo","AuthiChain","unverified","unfunded","No escrow","public source"):
+            for phrase in ("Vireo","AuthiChain","unverified","unfunded","No escrow","source-linked"):
                 self.assertIn(phrase.lower(),r.text.lower())
             self.assertIn("https://github.com/bracha55555-hue/aimarket/issues/76",r.text)
             self.assertIn("https://github.com/bracha55555-hue/aimarket/issues/94",r.text)
