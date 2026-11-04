@@ -1,0 +1,64 @@
+name: Notify IndexNow once of genuine MCP/A2A buyer review guide
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/first-buyer-indexnow-20261104.yml
+permissions:
+  contents: read
+jobs:
+  index_buyer_page:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Verify exact live buyer guide and notify official IndexNow only once
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json,os,time,urllib.request,urllib.error
+          root="https://aimarket-997u.onrender.com"
+          path="/hire-mcp-a2a-review"
+          key="f37a1f8f9550946afe81256013058e21"
+          ua="AI-Market-Real-Buyer-Guide-IndexNow/1.0"
+          def get(p):
+              req=urllib.request.Request(root+p,headers={"User-Agent":ua})
+              with urllib.request.urlopen(req,timeout=22) as r:
+                  if r.status!=200:raise ValueError("source HTTP status")
+                  raw=r.read(250001)
+              if len(raw)>250000:raise ValueError("source too large")
+              return raw.decode("utf-8","replace")
+          for attempt in range(40):
+              try:
+                  h=json.loads(get("/health"))
+                  if h.get("deployed_git_sha")!=os.environ["EXPECTED_SHA"]:
+                      raise ValueError("live revision not ready")
+                  page=get(path).lower()
+                  if not ("<html" in page and
+                          'name="robots" content="index,follow"' in page and
+                          all(word in page for word in ("vireo","authichain","unverified"))):
+                      raise ValueError("buyer guide not live")
+                  if root+path not in get("/sitemap.xml"):
+                      raise ValueError("buyer guide not in sitemap")
+                  if get("/"+key+".txt").strip()!=key:
+                      raise ValueError("site ownership key unavailable")
+                  print("VERIFIED_LIVE_REAL_BUYER_GUIDE",h["deployed_git_sha"])
+                  break
+              except (ValueError,KeyError,OSError,TimeoutError,TypeError) as error:
+                  print("WAIT_EXACT_BUYER_GUIDE",attempt+1,type(error).__name__)
+                  if attempt==39:raise RuntimeError("No IndexNow notification without exact live page")
+                  time.sleep(8)
+          packet={"host":"aimarket-997u.onrender.com","key":key,
+                  "keyLocation":root+"/"+key+".txt","urlList":[root+path]}
+          req=urllib.request.Request("https://api.indexnow.org/indexnow",method="POST",
+              data=json.dumps(packet,separators=(",",":")).encode("utf-8"),
+              headers={"Content-Type":"application/json","User-Agent":ua})
+          try:
+              with urllib.request.urlopen(req,timeout=35) as response:
+                  status=response.status
+          except urllib.error.HTTPError as error:
+              status=error.code
+          print("BUYER_GUIDE_INDEXNOW_HTTP",status)
+          if status not in (200,202):raise RuntimeError("Search notification not accepted")
+          print("Submitted only the real buyer landing URL. No proof of indexing, visits, customers or sales.")
+          PY
