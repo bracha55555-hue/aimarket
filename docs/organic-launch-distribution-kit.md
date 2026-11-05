@@ -92,6 +92,10 @@ Never automate posting this message to unrelated groups, issues, email addresses
 
 The live `/launch` page provides honest short copy, real integration URLs, and optional user-clicked Reddit and Hacker News composer links. These links never post without human action. The project must not secretly create accounts, bypass CAPTCHAs, buy reviews, auto-post unsolicited messages or invent counterparties.
 
+## Reusable framework integration, not a directory receipt
+
+The new [manual n8n public-interest versus signed-market discovery template](../templates/ai-market-n8n-real-agent-discovery.json) is a useful source artifact for n8n builders. Its [guide](./n8n-real-agent-discovery.md) explains import steps, absence of credentials and how unavailable GitHub status is shown as unknown. This is **not** an n8n gallery listing or a verified installation. The [next 100 tactics](./growth-100-incremental-buyer-led-20261105.md) extend the earlier 240 proposals; a proposed marketing tactic is not an executed campaign.
+
 ## Growth scorecard and priorities
 
 Report these independently, with source and observation timestamp:

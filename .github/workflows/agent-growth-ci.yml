@@ -48,6 +48,8 @@ jobs:
           node --check client/buyer-brief.js
           node test_buyer_brief.js
           python -m unittest -v test_buyer_acquisition.py
+      - name: Validate shareable n8n read-only workflow and separation of signed and public interest
+        run: node test_n8n_real_agent_discovery.js
       - name: Verify optional partner widget preserves genuine public market truth
         run: |
           node --check client/market-embed.js
