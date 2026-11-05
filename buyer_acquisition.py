@@ -5,6 +5,11 @@ from fastapi.responses import FileResponse
 
 router=APIRouter()
 PAGE=Path(__file__).resolve().parent/"client"/"mcp-a2a-audit.html"
+BUYER_SCRIPT=Path(__file__).resolve().parent/"client"/"buyer-brief.js"
+
+@router.get("/client/buyer-brief.js",include_in_schema=False)
+def buyer_brief_script():
+    return FileResponse(BUYER_SCRIPT,media_type="application/javascript",headers={"Cache-Control":"public, max-age=3600","X-Content-Type-Options":"nosniff"})
 
 @router.get("/hire-mcp-a2a-review",include_in_schema=False)
 def independent_ai_review_buyer_page(request:Request):
@@ -14,5 +19,5 @@ def independent_ai_review_buyer_page(request:Request):
     return FileResponse(PAGE,media_type="text/html",headers={
         "Cache-Control":"public, max-age=600",
         "X-Content-Type-Options":"nosniff",
-        "Content-Security-Policy":"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+        "Content-Security-Policy":"default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
         "Referrer-Policy":"strict-origin-when-cross-origin"})
