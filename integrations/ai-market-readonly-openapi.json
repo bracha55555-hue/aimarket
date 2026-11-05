@@ -223,10 +223,18 @@
                       ]
                     },
                     "count": {
-                      "type": "null"
+                      "type": "integer",
+                      "nullable": true,
+                      "description": "Always null when GitHub metadata cannot be verified"
                     },
                     "interests": {
-                      "type": "null"
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": true
+                      },
+                      "nullable": true,
+                      "description": "Always null on upstream failure; unknown is not an empty array"
                     },
                     "signed_marketplace_records": {
                       "type": "boolean",
