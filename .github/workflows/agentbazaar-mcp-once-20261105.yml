@@ -1,0 +1,90 @@
+name: One-time free AgentBazaar listing through verified public MCP
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/agentbazaar-mcp-once-20261105.yml]
+permissions:
+  contents: read
+jobs:
+  list_real_mcp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Use one unique truthful MCP listing after live verification
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json,os,time,urllib.request,urllib.error
+          host="https://aimarket-997u.onrender.com"
+          platform="https://agentbazaar.tech"
+          name="AI Market MCP Discovery (bracha55555-hue)"
+          ua="AI-Market-Genuine-MCP-Listing-One-Shot/1.0"
+          def read(url,limit=900000):
+              req=urllib.request.Request(url,headers={"Accept":"application/json","User-Agent":ua})
+              with urllib.request.urlopen(req,timeout=25) as r:
+                  if r.status!=200:raise ValueError("public read failed")
+                  data=r.read(limit+1)
+              if len(data)>limit:raise ValueError("oversized public result")
+              return json.loads(data)
+          for attempt in range(38):
+              try:
+                  health=read(host+"/health")
+                  if health.get("status")!="online" or health.get("deployed_git_sha")!=os.environ["EXPECTED_SHA"]:
+                      raise ValueError("wrong deployed revision")
+                  card=read(host+"/.well-known/agent-card.json")
+                  if not any(isinstance(p,dict) and p.get("protocolBinding")=="JSONRPC" and
+                      p.get("protocolVersion")=="1.0" and p.get("url")==host+"/a2a"
+                      for p in card.get("supportedInterfaces",[])):
+                      raise ValueError("missing live public A2A card")
+                  body=json.dumps({"jsonrpc":"2.0","id":1,"method":"tools/list",
+                      "params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28",
+                      "io.modelcontextprotocol/clientCapabilities":{}}}}).encode()
+                  req=urllib.request.Request(host+"/mcp",data=body,method="POST",headers={
+                      "Content-Type":"application/json","Accept":"application/json, text/event-stream",
+                      "MCP-Protocol-Version":"2026-07-28","Mcp-Method":"tools/list","User-Agent":ua})
+                  with urllib.request.urlopen(req,timeout=25) as r:
+                      if r.status!=200:raise ValueError("public MCP inaccessible")
+                      result=json.loads(r.read(180001))
+                  names={t.get("name") for t in result.get("result",{}).get("tools",[]) if isinstance(t,dict)}
+                  if not {"search_agents","real_buyer_requests","market_in_one_call"}.issubset(names):
+                      raise ValueError("public read-only tool list mismatch")
+                  print("EXACT_LIVE_MCP_VERIFIED",os.environ["EXPECTED_SHA"])
+                  break
+              except (OSError,TimeoutError,ValueError,KeyError,TypeError) as e:
+                  print("AWAIT_LIVE_MCP",attempt+1,type(e).__name__)
+                  if attempt==37:raise
+                  time.sleep(8)
+          directory=read(platform+"/explore/agents.json")
+          agents=directory.get("agents",[]) if isinstance(directory,dict) else []
+          if not isinstance(agents,list):raise RuntimeError("Directory format changed")
+          if any(isinstance(a,dict) and (a.get("name")==name or
+                  "aimarket-997u.onrender.com" in json.dumps(a).lower()) for a in agents):
+              print("ALREADY_PUBLICLY_LISTED_NO_DUPLICATE")
+              raise SystemExit(0)
+          payload={"name":name,"mcp_server_url":host+"/mcp",
+                   "provider":{"organization":"AI Market"},
+                   "card_url":host+"/.well-known/agent-card.json"}
+          request=urllib.request.Request(platform+"/v1/sell",method="POST",
+              data=json.dumps(payload,separators=(",",":")).encode(),
+              headers={"Content-Type":"application/json","Accept":"application/json","User-Agent":ua})
+          try:
+              with urllib.request.urlopen(request,timeout=45) as response:
+                  status=response.status
+                  raw=response.read(150001)
+          except urllib.error.HTTPError as e:
+              status=e.code
+              raw=b""
+          print("UNIQUE_MCP_DIRECTORY_SUBMISSION_HTTP",status)
+          if status==409:raise RuntimeError("NAME_TAKEN; no registration or public visibility confirmed")
+          if status not in (200,201,202) or len(raw)>150000:
+              raise RuntimeError("Directory did not confirm submission")
+          data=json.loads(raw)
+          if not isinstance(data,dict) or data.get("error"):
+              raise RuntimeError("Invalid registry acceptance response")
+          ident=data.get("agent_id") or data.get("id")
+          if isinstance(ident,str) and ident.startswith("ag_") and len(ident)<80:
+              print("PUBLIC_AGENT_ID",ident)
+          print("Accepted submission; visibility, independent users and commerce not yet verified.")
+          print("No private credentials logged, no fabricated jobs, no payment or wallet changes.")
+          PY
