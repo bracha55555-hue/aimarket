@@ -1,0 +1,77 @@
+name: Guide real inbound AI Market buyers
+on:
+  issues:
+    types: [opened]
+permissions:
+  contents: read
+jobs:
+  reply:
+    if: ${{ startsWith(github.event.issue.title, '[Public buyer interest] ') && github.event.issue.user.login != 'bracha55555-hue' && !endsWith(github.event.issue.user.login, '[bot]') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      issues: write
+    steps:
+      - name: Reply to one genuinely initiated buyer issue without creating commerce
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import json,os,urllib.request
+          event=json.load(open(os.environ["GITHUB_EVENT_PATH"],encoding="utf-8"))
+          issue=event.get("issue") or {}
+          owner=os.environ["GITHUB_REPOSITORY"].split("/")[0]
+          author=(issue.get("user") or {}).get("login","")
+          if (event.get("action")!="opened" or issue.get("state")!="open" or
+              not issue.get("title","").startswith("[Public buyer interest] ") or
+              not author or author.lower()==owner.lower() or author.endswith("[bot]") or
+              issue.get("pull_request")):
+              print("SKIPPED_NOT_INDEPENDENT_INBOUND_BUYER")
+              raise SystemExit(0)
+          endpoint="https://api.github.com/repos/"+os.environ["GITHUB_REPOSITORY"]+"/issues/"+str(int(issue["number"]))+"/comments"
+          headers={"Accept":"application/vnd.github+json",
+                   "Authorization":"Bearer "+os.environ["GH_TOKEN"],
+                   "User-Agent":"AI-Market-Consent-Scoped-Buyer-Handoff/1.0"}
+          marker="<!-- aimarket-public-buyer-handoff-v1 -->"
+          with urllib.request.urlopen(urllib.request.Request(endpoint+"?per_page=100",headers=headers),timeout=15) as r:
+              comments=json.load(r)
+          if not isinstance(comments,list):
+              raise RuntimeError("Cannot verify earlier comments")
+          if any(marker in str(c.get("body") or "") for c in comments if isinstance(c,dict)):
+              print("ALREADY_ANSWERED")
+              raise SystemExit(0)
+          description=(issue.get("title","")+" "+str(issue.get("body") or "")[:5000]).lower()
+          relevant=any(s in description for s in ("mcp","a2a","interoperab","integration preflight"))
+          message=(
+              marker+"\nThanks for posting a **real public buyer inquiry**. This is **unverified, "
+              "unfunded GitHub interest**, not a signed marketplace request, booking, work "
+              "authorization, payment or guarantee of a reply.\n\n"
+              "**Next step:** Keep one concrete public-safe task, acceptance criteria and "
+              "your actual budget in this issue. Independent providers may reply here with "
+              "their own scope, evidence and availability; verify them and explicitly agree "
+              "terms before any work. Do not publish secrets or customer data.\n\n"
+              "Browse [genuine signed offline offers](https://aimarket-997u.onrender.com/api/signed-offers) "
+              "(may be empty), or [publish an identity-signed, still unfunded buyer request]"
+              "(https://aimarket-997u.onrender.com/post-job) separately."
+          )
+          if relevant:
+              message+=(
+                  "\n\n**MCP/A2A leads to review, not matches:** "
+                  "[Vireo's original independent proposal](https://github.com/bracha55555-hue/aimarket/issues/76) "
+                  "and [AuthiChain's original independent proposal]"
+                  "(https://github.com/bracha55555-hue/aimarket/issues/94). "
+                  "Neither is identity-signed, vetted, confirmed available or an agreed price. "
+                  "Contact them voluntarily in their respective public threads if relevant."
+              )
+          message+=(
+              "\n\nThis pilot has **no escrow, custody or automatic settlement**. "
+              "No marketplace commission is earned from this public issue; any 2% fee applies "
+              "only to separately authorized eligible independently verified crypto settlement. "
+              "No agent is enrolled, contacted or paid by this informational reply."
+          )
+          headers["Content-Type"]="application/json"
+          data=json.dumps({"body":message}).encode("utf-8")
+          with urllib.request.urlopen(urllib.request.Request(endpoint,headers=headers,data=data,method="POST"),timeout=15) as r:
+              if r.status!=201:raise RuntimeError("GitHub did not create the reply")
+          print("ANSWERED_INDEPENDENT_PUBLIC_BUYER; no sale or signed demand inferred")
+          PY
