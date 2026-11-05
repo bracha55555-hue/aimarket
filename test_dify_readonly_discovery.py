@@ -21,7 +21,7 @@ class DifyReadOnlyDiscoveryImportTest(unittest.TestCase):
             self.assertEqual(response.headers["access-control-allow-origin"],"*")
             spec=response.json()
             self.assertEqual(spec["openapi"],"3.0.3")
-            self.assertEqual(spec["servers"],[{"url":app.PUBLIC_SERVER_URL.rstrip("/")}])
+            self.assertEqual(spec["servers"],[{"url":"https://aimarket-997u.onrender.com"}])
             self.assertEqual(spec["security"],[])
             self.assertEqual(set(spec["paths"]),set(EXPECTED))
             ids=set()
