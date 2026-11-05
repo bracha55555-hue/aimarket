@@ -14,7 +14,7 @@ assert.ok(notes.every(n=>n.parameters.content.includes("## ")&&n.parameters.widt
 assert.ok(notes.some(n=>n.parameters.content.includes("Manual")));
 assert.ok(notes.some(n=>n.parameters.content.includes("NOT a signed")));
 
-assert.equal(names.size,4);
+assert.equal(names.size,6);
 assert.deepEqual(executable.map(n=>n.type),[
   "n8n-nodes-base.manualTrigger",
   "n8n-nodes-base.httpRequest",
