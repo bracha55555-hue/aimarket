@@ -5,7 +5,14 @@ import app
 class FirstBuyerAcquisitionTest(unittest.TestCase):
     def test_source_linked_page_and_safe_scope(self):
         with TestClient(app.app) as c:
+            before=app.usage_events["mcp_a2a_buyer_landing_views"]
             r=c.get("/hire-mcp-a2a-review")
+            self.assertEqual(app.usage_events["mcp_a2a_buyer_landing_views"],before+1)
+            audited=c.get("/hire-mcp-a2a-review",headers={"user-agent":"AI-Market-Official-Business-Audit/1.0"})
+            self.assertEqual(audited.status_code,200)
+            self.assertEqual(app.usage_events["mcp_a2a_buyer_landing_views"],before+1)
+            homepage=c.get("/",headers={"accept":"text/html"})
+            self.assertIn("Need an MCP/A2A review?",homepage.text)
             self.assertEqual(r.status_code,200)
             self.assertIn("text/html",r.headers["content-type"])
             self.assertIn("frame-ancestors 'none'",r.headers["content-security-policy"])
