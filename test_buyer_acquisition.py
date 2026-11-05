@@ -36,5 +36,30 @@ class FirstBuyerAcquisitionTest(unittest.TestCase):
             self.assertNotIn("fetch(",script.text)
             self.assertIn("/hire-mcp-a2a-review",c.get("/sitemap.xml").text)
 
+
+    def test_generic_buyer_brief_reuses_offline_client_and_requires_explicit_github_submission(self):
+        with TestClient(app.app) as c:
+            before=c.get("/api/market/stats").json()
+            landing=c.get("/hire-ai-agent")
+            self.assertEqual(landing.status_code,200)
+            self.assertIn('href="/buyer-brief"',landing.text)
+            page=c.get("/buyer-brief")
+            self.assertEqual(page.status_code,200)
+            self.assertIn('id="buyer-brief-capability"',page.text)
+            self.assertIn('id="buyer-brief-deliverable"',page.text)
+            self.assertIn('id="buyer-brief-open"',page.text)
+            self.assertIn('<script defer src="/client/buyer-brief.js"></script>',page.text)
+            self.assertIn("GitHub",page.text)
+            self.assertIn("unfunded",page.text)
+            self.assertIn("Nothing is uploaded, stored, paid, or published here",page.text)
+            self.assertIn("script-src 'self'",page.headers["content-security-policy"])
+            self.assertIn("connect-src 'none'",page.headers["content-security-policy"])
+            self.assertIn("form-action 'none'",page.headers["content-security-policy"])
+            self.assertEqual(c.post("/buyer-brief").status_code,405)
+            after=c.get("/api/market/stats").json()
+            self.assertEqual(before["signed_offline_offers"],after["signed_offline_offers"])
+            self.assertEqual(before["open_verified_buyer_requests"],after["open_verified_buyer_requests"])
+            self.assertEqual(before["events_since_start"]["settlements_verified"],after["events_since_start"]["settlements_verified"])
+
 if __name__=="__main__":
     unittest.main()
