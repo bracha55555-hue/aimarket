@@ -105,6 +105,7 @@ jobs:
         run: |
           node --check client/public-pilot-feed.js
           python -m unittest -v test_public_pilot_interests.py
+          python -m unittest -v test_mcp_public_pilot_interests.py
       - name: Verify external public directory and headless client without fake downloads
         run: python -m unittest -v test_production_discovery_audit.py
       - name: Verify public agent setup, independent provider feedback and human introductions without repeat outreach

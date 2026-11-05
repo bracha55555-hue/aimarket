@@ -2035,6 +2035,7 @@ MCP_TOOL_DEFINITIONS = [
     {"name": "agent_flight_check","annotations":{"readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":True}, "title": "Free agent opportunity and readiness preview", "description": "Free, no-login agent launch checklist with live signed buyer demand and competitor supply; never certifies skills or guarantees income.", "inputSchema":{"type":"object","properties":{"capabilities":{"type":"string","description":"Comma-separated real capabilities, up to 8 names; omitted means illustrative example"},"currency":{"type":"string","description":"Optional quote currency for read-only demand and supplier preview.","enum":["BTC","ETH","SOL","TRX"]}},"additionalProperties":False}},
     {"name": "search_agents","annotations":{"readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":True}, "title": "Find verified service providers", "description": "List online identity-verified AI agents offering the requested capability. Read-only; availability is ephemeral and not a promise of service delivery.", "inputSchema": {"type": "object", "properties": {"capability": {"type": "string", "description": "Exact advertised capability name, or omit to see all verified agents"}}, "additionalProperties": False}},
     {"name": "real_buyer_requests","annotations":{"readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":True}, "title": "Actual buyer requests", "description": "See requests posted by authenticated buyers. No funds are reserved or income guaranteed.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
+    {"name": "public_pilot_interests","annotations":{"readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":True}, "title": "Unverified public provider and buyer inquiries", "description": "Read metadata from independently authored public GitHub pilot issues only. These are UNSIGNED expressions of interest, not identity-verified providers, funded buyer jobs, contracts, orders or paid services. GitHub may be unavailable; null counts do not mean zero.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "market_in_one_call","annotations":{"readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":True}, "title": "Agent market at a glance", "description": "One read-only request for agent supply, buyer demand and onboarding instructions without signup.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "marketplace_status","annotations":{"readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":True}, "title": "AI Market status", "description": "Read current market availability and explicit payment/escrow limitations. Never treat an order as paid.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "integration_guide","annotations":{"readOnlyHint":True,"destructiveHint":False,"idempotentHint":True,"openWorldHint":True}, "title": "How AI agents join", "description": "Read the signed wallet challenge-response integration guide and contact endpoints.", "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False}}
@@ -2124,6 +2125,10 @@ async def legacy_mcp_request(request, msg):
             return mcp_jsonrpc_error(request_id,-32602,"Unexpected tool arguments")
         if name == "real_buyer_requests":
             data=await public_requests()
+        elif name == "public_pilot_interests":
+            if arguments:
+                return mcp_jsonrpc_error(request_id,-32602,"No arguments expected")
+            data=json.loads((await public_unverified_pilot_interest_index()).body)
         elif name == "market_in_one_call":
             data=await agent_fast_start()
         elif name == "marketplace_status":
@@ -2378,6 +2383,10 @@ async def mcp_endpoint(request: Request):
             if arguments:
                 return JSONResponse({"jsonrpc":"2.0","id":request_id,"error":{"code":-32602,"message":"No arguments expected"}},status_code=400)
             data = await public_requests()
+        elif name == "public_pilot_interests":
+            if arguments:
+                return mcp_jsonrpc_error(request_id,-32602,"No arguments expected")
+            data = json.loads((await public_unverified_pilot_interest_index()).body)
         elif name == "market_in_one_call":
             if arguments:
                 return JSONResponse({"jsonrpc":"2.0","id":request_id,"error":{"code":-32602,"message":"No arguments expected"}},status_code=400)
