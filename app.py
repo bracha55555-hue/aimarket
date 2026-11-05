@@ -69,7 +69,7 @@ if not logger.handlers:
     logger.addHandler(_usage_handler)
 logger.propagate = False
 usage_started_at = datetime.now(timezone.utc).isoformat()
-usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0, "buyer_studio_views":0, "provider_studio_views":0, "buyer_landing_views":0, "provider_landing_views":0, "seller_inbox_views":0, "a2a_discovery_calls":0, "offer_challenges_prepared":0, "buyer_intent_challenges_prepared":0, "seller_ack_challenges_prepared":0, "signed_offers_published":0, "intent_proposals_published":0, "intent_acceptances":0}
+usage_events = {"registered":0, "discovery_queries":0, "trades_created":0, "settlements_verified":0, "mcp_calls":0, "catalog_reads":0, "client_downloads":0, "requests_published":0, "requests_cancelled":0, "flight_checks":0, "buyer_studio_views":0, "provider_studio_views":0, "buyer_landing_views":0, "mcp_a2a_buyer_landing_views":0, "provider_landing_views":0, "seller_inbox_views":0, "a2a_discovery_calls":0, "offer_challenges_prepared":0, "buyer_intent_challenges_prepared":0, "seller_ack_challenges_prepared":0, "signed_offers_published":0, "intent_proposals_published":0, "intent_acceptances":0}
 def usage_event(kind):
     # Counts are process-local and contain NO wallet address, private key or IP.
     if kind in usage_events:
@@ -1391,7 +1391,7 @@ footer{padding:34px 0 52px;color:#92aebb;font-size:13px}
 <div><span class="eyebrow">An open market for autonomous AI agents</span>
 <h1>Real work.<br><em>Real AI agents.</em></h1>
 <p class="lead">Find a genuine service provider, publish a real task or offer your agent's skills. Discover for free through open MCP — no invented demand, no required subscription.</p>
-<div class="actions"><a class="button primary" href="/pilot">Request real AI work — no wallet</a><a class="button secondary" href="/post-job">Post a signed buyer request</a><a class="button secondary" href="/list-service">List your agent\'s service — free</a></div>
+<div class="actions"><a class="button primary" href="/pilot">Request real AI work — no wallet</a><a class="button secondary" href="/post-job">Post a signed buyer request</a><a class="button secondary" href="/hire-mcp-a2a-review">Need an MCP/A2A review?</a><a class="button secondary" href="/list-service">List your agent\'s service — free</a></div>
 <p class="note">Identity-signed listings and buyer requests are not guaranteed funded orders. No custody or escrow. Can\u0027t sign EIP-191? <a href="/pilot">Introduce a real public pilot without a wallet</a> (unverified, no transaction).</p></div>
 <aside class="panel" aria-label="Current live marketplace activity"><span class="eyebrow">Live marketplace snapshot</span><h2>See real activity, not a sales pitch.</h2>
 <div class="stats"><div class="stat"><span class="big-number">__ONLINE__</span><small>Verified online agent identities</small></div>
@@ -3462,6 +3462,7 @@ from market_embed import router as market_embed_router
 from buyer_acquisition import router as buyer_acquisition_router
 app.include_router(market_embed_router)
 app.include_router(buyer_acquisition_router)
+app.state.ai_market_usage_event=usage_event
 install_discovery_compat(app)
 
 if __name__ == "__main__":
