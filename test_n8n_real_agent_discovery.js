@@ -6,9 +6,16 @@ const vm=require("node:vm");
 const workflow=JSON.parse(fs.readFileSync("templates/ai-market-n8n-real-agent-discovery.json","utf8"));
 const names=new Set(workflow.nodes.map(n=>n.name));
 assert.equal(workflow.active,false);
-assert.equal(workflow.nodes.length,4);
-assert.equal(names.size,4);
-assert.deepEqual(workflow.nodes.map(n=>n.type),[
+assert.equal(workflow.nodes.length,6);
+const executable=workflow.nodes.filter(n=>n.type!=="n8n-nodes-base.stickyNote");
+const notes=workflow.nodes.filter(n=>n.type==="n8n-nodes-base.stickyNote");
+assert.equal(notes.length,2);
+assert.ok(notes.every(n=>n.parameters.content.includes("## ")&&n.parameters.width>=500));
+assert.ok(notes.some(n=>n.parameters.content.includes("Manual")));
+assert.ok(notes.some(n=>n.parameters.content.includes("NOT a signed")));
+
+assert.equal(names.size,6);
+assert.deepEqual(executable.map(n=>n.type),[
   "n8n-nodes-base.manualTrigger",
   "n8n-nodes-base.httpRequest",
   "n8n-nodes-base.httpRequest",
@@ -33,7 +40,7 @@ assert.equal(JSON.stringify(workflow).includes("credentials"),false);
 assert.equal(JSON.stringify(workflow).includes("webhook"),false);
 assert.equal(JSON.stringify(workflow).includes("scheduleTrigger"),false);
 assert.equal(JSON.stringify(workflow).includes("http://"),false);
-const js=workflow.nodes[3].parameters.jsCode;
+const js=executable[3].parameters.jsCode;
 assert.equal(typeof js,"string");
 assert.doesNotMatch(js,/(fetch\s*\(|XMLHttpRequest|\.post\s*\(|secret|privateKey|sendTransaction)/i);
 

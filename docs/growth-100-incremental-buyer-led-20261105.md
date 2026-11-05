@@ -156,6 +156,7 @@ This is **100 NEW proposals** extending [the pre-existing 240-item strategy inve
 
 - [x] Brainstormed and recorded 100 additional candidate tactics; this is **not** 100 campaigns executed.
 - [x] The initial n8n template and its source-level contract check are added in the same pull request as this plan, once merged; no third-party n8n listing is implied.
+- [x] A separate, read-only OpenAPI custom tool spec for Dify and other OpenAPI clients is now implemented with source and CI, not an external Dify import or installed user. Tactic 254 is thus implemented only as a source artifact; no marketplace listing.
 - [ ] Official n8n workflow template publication: requires review and acceptance by n8n; not claimed.
 - [ ] No verified independent signed buyer, completed delivery or commission is claimed by any of these tactics.
 

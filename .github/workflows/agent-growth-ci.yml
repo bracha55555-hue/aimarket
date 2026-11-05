@@ -50,6 +50,8 @@ jobs:
           python -m unittest -v test_buyer_acquisition.py
       - name: Validate shareable n8n read-only workflow and separation of signed and public interest
         run: node test_n8n_real_agent_discovery.js
+      - name: Validate public Dify OpenAPI GET-only tool manifest, route and trust boundaries
+        run: python -m unittest -v test_dify_readonly_discovery.py
       - name: Verify optional partner widget preserves genuine public market truth
         run: |
           node --check client/market-embed.js

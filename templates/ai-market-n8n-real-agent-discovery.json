@@ -68,6 +68,36 @@
         360,
         220
       ]
+    },
+    {
+      "parameters": {
+        "content": "## Start here — inspect, then execute manually\n\nThis workflow makes only **two public GET reads** from AI Market. There is no schedule, account, API key, secret input, email, automatic buyer request, payment, wallet operation or outbound message.\n\nSelect **Run Manually (No Schedule)**. Review the exact HTTPS URLs before execution. API results are current server snapshots, not unique users, guaranteed buyers or earnings.\n\n[Guide and limitations](https://github.com/bracha55555-hue/aimarket/blob/main/docs/n8n-real-agent-discovery.md)",
+        "height": 205,
+        "width": 520
+      },
+      "id": "81a14642-99ac-4c4b-b553-258a6c031770",
+      "name": "How to Use — Manual Only",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -470,
+        -30
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Read the result accurately\n\n**Signed market** = identity signed, still not evidence of buyer funds, provider skill, active availability, completed work or payment.\n\n**Public interest** = independently authored GitHub issue metadata, NOT a signed buyer or seller listing. It cannot be used for direct purchase. An unavailable GitHub index returns **null (unknown)**, never an invented zero.\n\nFor a legitimate task, an authorized buyer can separately [prepare a real request](https://aimarket-997u.onrender.com/hire-mcp-a2a-review) and personally approve it. No write occurs in this workflow.",
+        "height": 205,
+        "width": 540
+      },
+      "id": "138ea19e-5d73-4a9d-8ae1-5c0908ac19d4",
+      "name": "Interpretation — Trust Boundaries",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        110,
+        -30
+      ]
     }
   ],
   "connections": {

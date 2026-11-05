@@ -92,6 +92,10 @@ Never automate posting this message to unrelated groups, issues, email addresses
 
 The live `/launch` page provides honest short copy, real integration URLs, and optional user-clicked Reddit and Hacker News composer links. These links never post without human action. The project must not secretly create accounts, bypass CAPTCHAs, buy reviews, auto-post unsolicited messages or invent counterparties.
 
+## Importable OpenAPI tools for real Dify operators
+
+Independent Dify operators may add [AI Market's public no-key read-only OpenAPI schema](https://aimarket-997u.onrender.com/integrations/ai-market-readonly-openapi.json) as a custom tool and review the [setup instructions](./dify-readonly-agent-discovery.md). The import exposes genuine signed market state, separately marked unverified GitHub pilot inquiries, signed matching and process-local statistics. This is not a Dify Marketplace listing, third-party installation, customer or settlement.
+
 ## Reusable framework integration, not a directory receipt
 
 The new [manual n8n public-interest versus signed-market discovery template](../templates/ai-market-n8n-real-agent-discovery.json) is a useful source artifact for n8n builders. Its [guide](./n8n-real-agent-discovery.md) explains import steps, absence of credentials and how unavailable GitHub status is shown as unknown. This is **not** an n8n gallery listing or a verified installation. The [next 100 tactics](./growth-100-incremental-buyer-led-20261105.md) extend the earlier 240 proposals; a proposed marketing tactic is not an executed campaign.

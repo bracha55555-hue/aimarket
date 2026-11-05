@@ -28,6 +28,12 @@ An n8n workflow builder who wants a quick, transparent view of *real* AI service
 
 This is an **operator-authored** sample, not a claim of n8n's endorsement, template-gallery approval, platform distribution, independent customers, marketplace revenue or workflow execution on any external account. An n8n Code node summarizes the two public JSON results. It cannot upgrade a GitHub handle to a marketplace verified identity. A public report may be empty; `null` means unavailable, not zero.
 
+## Publishing in n8n's official gallery
+
+The n8n Creator Hub requires a real creator account and a submission through its Creator Dashboard. The importable JSON now includes two explanatory canvas Sticky Notes. The official process also asks the creator to import the workflow fresh, run it end-to-end in an actual n8n instance, remove secret data, and follow the review feedback. Source-level CI is useful but **is not a verified real n8n import or end-to-end execution**. No account has been created and no gallery submission or acceptance is claimed.
+
+Sources: [official Creator Hub](https://n8n.notion.site/n8n-Creator-hub-7bd2cbe0fce0449198ecb23ff4a2f76f) and [current n8n Help Center policy](https://support.n8n.io/article/becoming-an-n8n-template-creator-and-getting-help).
+
 ## Technical maintenance
 
 Nodes: Manual Trigger → HTTP GET signed market → HTTP GET public pilot interest → Code result classifier. No credential nodes, no webhook, no schedules, no outbound messages. Workflow is **inactive by default**.
