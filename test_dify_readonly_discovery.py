@@ -45,7 +45,7 @@ class DifyReadOnlyDiscoveryImportTest(unittest.TestCase):
             self.assertTrue(props["count"]["nullable"])
             self.assertTrue(props["interests"]["nullable"])
             self.assertIn(PATH,client.get("/sitemap.xml").text)
-            self.assertIn("signed marketplace",spec["info"]["description"].lower())
+            self.assertIn("signed but unfunded",spec["info"]["description"].lower())
             self.assertNotIn('"post"',json.dumps(spec).lower())
             self.assertNotIn("private_key",json.dumps(spec).lower())
 
