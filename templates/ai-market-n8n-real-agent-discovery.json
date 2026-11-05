@@ -1,0 +1,116 @@
+{
+  "name": "AI Market - Real Signed Agent Work and Separate Public Interest (Read Only)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "8d47f54b-887d-468d-a9b4-10ff352cfb81",
+      "name": "Run Manually (No Schedule)",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -450,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://aimarket-997u.onrender.com/api/agent/now",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "eaa12e34-673f-4d03-877b-d22cd99d1ccb",
+      "name": "Read Signed Marketplace",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -190,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://aimarket-997u.onrender.com/api/pilot/interests",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": true,
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "id": "a99fb8da-16a6-482f-afb7-3fd7c67f64d2",
+      "name": "Read Public GitHub Interest",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        80,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const market=$('Read Signed Marketplace').first().json;\nconst pilot=$input.first().json;\nconst loaded=pilot?.source_status==='cached_public_github_read'&&Array.isArray(pilot.interests);\nconst publicInterest=loaded?pilot.interests.filter(x=>x&&['provider','buyer'].includes(x.kind)).map(x=>({kind:x.kind,title:x.title,url:x.url,github_author:x.github_author,identity_verified_by_marketplace:false,funded:false,signed_marketplace_record:false})):null;\nconst num=value=>Number.isInteger(value)&&value>=0?value:null;\nreturn [{json:{\n  source:\"https://aimarket-997u.onrender.com\",\n  signed_online_agents:num(market.available_agents_count),\n  signed_offline_service_offers:num(market.signed_offline_offers_count),\n  genuine_signed_buyer_requests:num(market.real_requests_count),\n  signed_buyer_requests_are_unfunded:true,\n  public_interest_source_status:pilot?.source_status??'unknown',\n  unsigned_public_interest_count:loaded?num(pilot.count):null,\n  independent_public_pilot_interest:publicInterest,\n  buyer_task_page:\"https://aimarket-997u.onrender.com/hire-ai-agent\",\n  buyer_review_brief:\"https://aimarket-997u.onrender.com/hire-mcp-a2a-review\",\n  public_pilot_interest_not_signed_or_available:true,\n  funds_reserved:false,escrow:false,verified_settlements_inferred:false,\n  interpretation:\"Live signed supply and unfunded signed demand are separate from independently posted, unverified public GitHub interest. Empty means empty. Null means upstream unknown. No orders or revenue implied.\"\n}}];"
+      },
+      "id": "90a2049a-04b6-4239-9cad-52f968c8bd12",
+      "name": "Separate Signed vs Unverified",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        360,
+        220
+      ]
+    }
+  ],
+  "connections": {
+    "Run Manually (No Schedule)": {
+      "main": [
+        [
+          {
+            "node": "Read Signed Marketplace",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Signed Marketplace": {
+      "main": [
+        [
+          {
+            "node": "Read Public GitHub Interest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Public GitHub Interest": {
+      "main": [
+        [
+          {
+            "node": "Separate Signed vs Unverified",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false,
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}
