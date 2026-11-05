@@ -44,7 +44,10 @@ jobs:
       - name: Verify public role-specific organic buyer and provider landing pages
         run: python -m unittest -v test_organic_landing.py
       - name: Verify source-linked MCP and A2A first-buyer acquisition page
-        run: python -m unittest -v test_buyer_acquisition.py
+        run: |
+          node --check client/buyer-brief.js
+          node test_buyer_brief.js
+          python -m unittest -v test_buyer_acquisition.py
       - name: Verify optional partner widget preserves genuine public market truth
         run: |
           node --check client/market-embed.js
