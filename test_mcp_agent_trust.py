@@ -6,7 +6,7 @@ import app as market
 READ_ONLY = {
     "browse_purchase_intents","browse_signed_offers","match_real_services",
     "agent_flight_check","search_agents","real_buyer_requests",
-    "market_in_one_call","marketplace_status","integration_guide",
+    "market_in_one_call","marketplace_status","integration_guide","public_pilot_interests",
 }
 SIGNED_OR_CHALLENGE = {
     "prepare_purchase_intent","publish_purchase_intent","prepare_accept_intent",
@@ -17,7 +17,7 @@ SIGNED_OR_CHALLENGE = {
 class IndependentMCPAgentTrustTest(unittest.TestCase):
     def test_read_only_tools_are_annotated_and_signed_writes_never_disguised(self):
         declared=market.MCP_TOOL_DEFINITIONS
-        self.assertEqual(len(declared),17)
+        self.assertEqual(len(declared),18)
         self.assertEqual({d["name"] for d in declared},READ_ONLY|SIGNED_OR_CHALLENGE)
         documented=0
         total=0
