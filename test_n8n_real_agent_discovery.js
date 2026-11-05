@@ -45,7 +45,7 @@ function evaluate(signed,pilot){
     },
     $input:{first:()=>({json:pilot})}
   };
-  const result=vm.runInNewContext(js,context,{timeout:1000});
+  const result=vm.runInNewContext("(()=>{\n"+js+"\n})()",context,{timeout:1000});
   assert.equal(result.length,1);
   return result[0].json;
 }
