@@ -18,7 +18,7 @@ This is **100 NEW proposals** extending [the pre-existing 240-item strategy inve
 | 263: public OpenAPI schema review brief | Reaches a buyer with a concrete problem | Independently posted buyer issue with acceptance criteria |
 | 271: Shopify catalog cleanup buyer brief | Specific revenue-adjacent task for a small business | Actual owner-submitted inquiry |
 | 291: request an educator review | Framework-specific distribution through a consenting publisher | Independent opt-in mention/feedback |
-| 321: explain real task completion | Reduce drop-off before a real GitHub buyer post | Public buyer inquiry created independently |
+| 323: explain the post-submission flow | Reduce drop-off before a real GitHub buyer post | Public buyer inquiry created independently |
 | 340: execution ledger | Exposes what is proven and prevents repeated ineffective work | Source-linked evidence per stage |
 
 
