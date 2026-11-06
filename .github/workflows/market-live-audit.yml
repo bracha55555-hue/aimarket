@@ -58,6 +58,7 @@ jobs:
           verified=bool(live_sha and re.fullmatch("[0-9a-f]{40}",live_sha))
           result["production_health"]={"status":health.get("status"),"escrow":health.get("escrow"),
                                         "deployed_git_sha":live_sha} if health else {"error":error}
+          result["production_signed_record_storage"]=((health or {}).get("signed_record_storage") or {"mode":"unknown","survives_app_redeploy":None})
           result["deployment_verification"]={
               "expected_main_git_sha":expected_sha,
               "deployed_git_sha":live_sha if verified else None,
@@ -78,7 +79,9 @@ jobs:
               result["production_homepage"]={"error":type(exc).__name__}
           # Read-only confirmation of actual deployed two-sided browser funnel; never create orders.
           result["production_browser_funnel"]={}
-          for page,needle in (("/post-job","buyer-matches"),
+          for page,needle in (("/buyer-brief",'id="buyer-brief-open"'),
+                              ("/hire-ai-agent",'href="/buyer-brief"'),
+                              ("/post-job","buyer-matches"),
                               ("/list-service","id=\"provider\""),
                               ("/seller-inbox","Review real buyer proposals")):
               try:
