@@ -707,7 +707,7 @@ async def public_requests(capability: Optional[str] = None):
     return {"verified_buyer_requests":rows[:MAX_PUBLIC_NEEDS],"count":len(rows),
             "verified_identity":True,"funds_reserved":False,
             "meaning":"Requests by signed buyers; NOT funded orders or guaranteed income",
-            "persistence":"Ephemeral; expire after 24 hours or earlier on host restart"}
+            "persistence":signed_record_persistence_note(),"signed_record_storage":signed_record_storage_status()}
 
 @app.get("/api/agent/now")
 async def agent_fast_start(capability: Optional[str] = None, currency: Optional[str] = None,
@@ -896,7 +896,7 @@ async def compute_public_matches(capability=None,currency=None,request_id=None):
     return {"matches":rows[:100],"count":len(rows),"truncated":len(rows)>100,
             "buyer_requests_considered":len(needs),"signed_offline_offers_considered":len(offers),
             "identity_signed_only":True,"escrow":False,"payment_verified":False,
-            "trade_fee_rate":0.02,"persistence":("Optional local N4 storage, not guaranteed across host replacement" if n4_store else "Process-local until expiry or restart"),
+            "trade_fee_rate":0.02,"persistence":signed_record_persistence_note(),"signed_record_storage":signed_record_storage_status(),
             "next_step":"Contact the provider, establish genuine delivery terms and use verified marketplace payment flow.",
             "warning":"Offline listing is not proof of availability, delivery or URL ownership. Matching is not an order or settled trade."}
 
