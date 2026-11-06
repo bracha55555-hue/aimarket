@@ -36,5 +36,23 @@ class HonestDurabilityStatusTest(unittest.TestCase):
             self.assertFalse(asyncio.run(market.health_check())["durable_trades"])
             self.assertFalse(asyncio.run(market.health_check())["escrow"])
 
+
+    def test_request_and_match_storage_contract(self):
+        stores=(None,market.N4Store.__new__(market.N4Store),
+                market.N4PostgresStore.__new__(market.N4PostgresStore))
+        for store in stores:
+            with self.subTest(store=type(store).__name__),patch.object(market,"n4_store",store),patch.object(market,"expire_stale_trades",return_value=0):
+                expected=market.signed_record_storage_status()
+                note=market.signed_record_persistence_note()
+                requests=asyncio.run(market.public_requests())
+                matches=asyncio.run(market.compute_public_matches())
+                for response in (requests,matches):
+                    self.assertEqual(response["signed_record_storage"],expected)
+                    self.assertEqual(response["persistence"],note)
+                    self.assertFalse(response.get("payment_verified",False))
+                self.assertEqual(matches["trade_fee_rate"],0.02)
+                self.assertFalse(requests["funds_reserved"])
+                self.assertFalse(matches["escrow"])
+
 if __name__=="__main__":
     unittest.main()
