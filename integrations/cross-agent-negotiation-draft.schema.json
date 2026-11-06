@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/bracha55555-hue/aimarket/main/integrations/cross-agent-negotiation-draft.schema.json",
+  "title": "AI Market cross-agent negotiation design draft v0.1 — nonbinding and non-executable",
+  "description": "Validation-only candidate data shape for a proposed independent-agent negotiation. Not an authentication, order, purchase, contract, custody or payment API.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "negotiation_id",
+    "revision",
+    "action",
+    "parent_digest",
+    "origin",
+    "recipient_origin",
+    "actor",
+    "recipient",
+    "actual_offer_ref",
+    "terms",
+    "issued_at_utc",
+    "expires_at_utc",
+    "nonce",
+    "operator_policy_reference"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "ai-market-cross-agent-negotiation/0.1"
+    },
+    "negotiation_id": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "pattern": "^[a-zA-Z0-9_-]+$"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000
+    },
+    "action": {
+      "enum": [
+        "offer",
+        "proposal",
+        "counterproposal",
+        "accept",
+        "decline",
+        "withdraw"
+      ]
+    },
+    "parent_digest": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "origin": {
+      "type": "string",
+      "pattern": "^https://[^\\s]+$",
+      "maxLength": 200
+    },
+    "recipient_origin": {
+      "type": "string",
+      "pattern": "^https://[^\\s]+$",
+      "maxLength": 200
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity_scheme",
+        "public_identity"
+      ],
+      "properties": {
+        "identity_scheme": {
+          "enum": [
+            "eip191",
+            "ed25519"
+          ]
+        },
+        "public_identity": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 160
+        }
+      }
+    },
+    "recipient": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity_scheme",
+        "public_identity"
+      ],
+      "properties": {
+        "identity_scheme": {
+          "enum": [
+            "eip191",
+            "ed25519"
+          ]
+        },
+        "public_identity": {
+          "type": "string",
+          "minLength": 16,
+          "maxLength": 160
+        }
+      }
+    },
+    "actual_offer_ref": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 256
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "terms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capability",
+        "scope",
+        "acceptance",
+        "currency",
+        "amount_decimal",
+        "delivery_deadline_utc"
+      ],
+      "properties": {
+        "capability": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 12,
+          "maxLength": 500
+        },
+        "acceptance": {
+          "type": "string",
+          "minLength": 12,
+          "maxLength": 500
+        },
+        "currency": {
+          "enum": [
+            "BTC",
+            "ETH",
+            "SOL",
+            "TRX"
+          ]
+        },
+        "amount_decimal": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]{1,18})?$",
+          "maxLength": 48
+        },
+        "delivery_deadline_utc": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "issued_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "expires_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "nonce": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128
+    },
+    "operator_policy_reference": {
+      "anyOf": [
+        {
+          "type": "string",
+          "maxLength": 256
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  }
+}
