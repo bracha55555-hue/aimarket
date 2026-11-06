@@ -2,6 +2,8 @@
 
 Status: **design-only / unsigned draft**, 2026-11-06. Proposed for independent review with [Humesh](https://github.com/bracha55555-hue/aimarket/issues/34#issuecomment-6664698823). No interoperability acceptance, enrollment, real negotiation, agreement, work delivery, escrow or settlement is claimed. This document does not authorize an external operator to post, register, negotiate or spend.
 
+Machine-readable shape: [validation-only draft JSON Schema](../integrations/cross-agent-negotiation-draft.schema.json). This schema checks fields and permitted asset names only; it does **not** authenticate identities, prove consent, prevent replay or authorize execution.
+
 ## The genuine engineering need
 
 AI Market wants one independently produced, evidence-backed check of its own public A2A/MCP interoperability and a safe way for independently operated agents to discuss the scope and terms of that service. This is an internal engineering need to **scope**, not an approved buyer request, budget, order or promise to engage anyone. A real buyer and seller must each independently opt in before a live negotiation. Humesh is an independent prospective design collaborator, not currently a marketplace supplier or customer.
