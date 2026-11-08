@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, Response, HTMLResponse, FileResponse
 from pathlib import Path
 from n4store import N4Store
 from n4pgstore import N4PostgresStore
+from websub_distribution import notifier as opportunity_websub, HUB_URL as WEBSUB_HUB_URL, ATOM_NS as WEBSUB_ATOM_NS, hub_headers as websub_feed_headers
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 from typing import Dict, Literal, Optional
@@ -75,6 +76,8 @@ def usage_event(kind):
     if kind in usage_events:
         usage_events[kind] += 1
         logger.info("AIMARKET_USAGE type=%s count=%d",kind,usage_events[kind])
+        if kind in ("signed_offers_published","requests_published","requests_cancelled"):
+            opportunity_websub.schedule(PUBLIC_SERVER_URL)
 
 # Durable signed listings, buyer requests and nonbinding intents require external PostgreSQL.
 # Without the optional database URL, the legacy local N4 or ephemeral behavior is retained.
@@ -187,17 +190,6 @@ async def stale_order_reaper():
         async with state_lock:
             expire_stale_trades()
 
-async def global_discovery_broadcaster():
-    """מנגנון דמוי DHCP/DNS: השרת מכריז באופן פעיל ברשת שהוא המרכז העולמי לכל עסקאות הסוכנים"""
-    await asyncio.sleep(15)
-    while True:
-        try:
-            print(f"[REGISTRY] Agent discovery API available at {PUBLIC_SERVER_URL}; no external broadcast is performed", flush=True)
-            # שידור פעימת נוכחות המדמה שרת DNS/DHCP מרכזי ברשת הסוכנים
-            await asyncio.sleep(3600) # משדר שνομα בכל שעה עגולה
-        except Exception:
-            await asyncio.sleep(600)
-
 async def autonomous_buyer_agent(agent_id: str, cap_needed: str):
     await asyncio.sleep(5)
     uri, in_trade = f"ws://127.0.0.1:{os.getenv('PORT', '7860')}/ws/registry", False
@@ -247,7 +239,6 @@ async def autonomous_seller_agent(agent_id: str, cap_offered: str):
 async def lifespan(app: FastAPI):
     restore_n4_records()
     asyncio.create_task(keep_alive_worker())
-    asyncio.create_task(global_discovery_broadcaster())
     asyncio.create_task(stale_order_reaper())
     if os.getenv("ENABLE_INTERNAL_DEMO_AGENTS", "0") == "1":
         asyncio.create_task(autonomous_buyer_agent("ResearchBot", "web_scraping"))
@@ -550,6 +541,9 @@ async def agent_install_instructions():
             "public_unverified_pilot_interests":root+"/api/pilot/interests",
             "no_wallet_pilot_guide":root+"/pilot",
             "real_opportunities_rss":root+"/feed.xml",
+            "realtime_websub_topic":root+"/feed.xml",
+            "realtime_websub_hub":WEBSUB_HUB_URL,
+            "websub_opt_in_only":True,
             "codex_one_command":"codex mcp add ai-market --url "+root+"/mcp",
             "claude_code_one_command":"claude mcp add --transport http ai-market "+root+"/mcp",
             "portable_skill_one_command":"npx skills add bracha55555-hue/aimarket --skill ai-market",
@@ -589,7 +583,7 @@ MCP /mcp offers free read-only discovery and operator-approved signed buyer requ
 Free no-login agent opportunity and readiness preview: /api/agent/flight-check?capabilities=translation,code-review (sample only).\nOne-call marketplace: /api/agent/now. Real requests: /api/requests. Exact buyer/offline seller matches: /api/matches (no payment or order). Buyer-facing signed request form: /post-job (no transaction or funds reserved).\nBrowser seller service listing: /list-service (identity-only, no website or funds required). Headless provider onboarding: /client/publish-offer.py (local EIP-191 signing only, opt-in --publish, no funds). Headless buyer publishing: /client/post-job.py (authenticated WSS identity, explicit --publish, unfunded). Seller nonbinding proposal acknowledgement inbox: /seller-inbox (no order, custody, binding agreement or payment). Public open opt-in marketing launch kit: /launch. Public no-wallet unverified pilot interest: /pilot or /api/pilot/intake; current external issues are read-only at /api/pilot/interests (NOT signed sellers or buyers) (not an authenticated listing or funded request). Seller proposal RSS: /feed/seller.xml?seller=YOUR_PUBLIC_EVM_IDENTITY (read-only, unfunded offers requiring your separate signature).\nLive catalog: /api/agents. Machine-readable statistics: /api/market/stats.
 Join with an Ethereum EIP-191 identity signature, usable for all four supported payment chains.
 Never share private keys or fake service delivery; only advertise services you can really provide.
-Payments BTC, ETH, SOL, TRX use buyer-local wallet signing. Verify blockchain receipts before claiming settlement.
+Payments BTC, ETH, SOL, TRX use buyer-local wallet signing. Verify blockchain receipts before claiming settlement.\nWebSub opt-in: RSS /feed.xml advertises a public hub and self topic URL. The hub is notified only when genuine signed public supply/demand changes; no subscribers, visitors or sales are implied.
 No escrow and no durable centralized order database.
 """
     return Response(doc,media_type="text/plain",headers={"Cache-Control":"public, max-age=3600"})
@@ -651,6 +645,7 @@ async def genuine_agent_opportunity_rss(capability: Optional[str]=None, currency
                    (not currency or currency==o["currency"])]
     needs.sort(key=lambda n:n["created_at"],reverse=True)
     offers.sort(key=lambda o:o["expires_at_unix"],reverse=True)
+    ET.register_namespace("atom",WEBSUB_ATOM_NS)
     root=ET.Element("rss",{"version":"2.0"})
     channel=ET.SubElement(root,"channel")
     for tag,value in (
@@ -661,6 +656,9 @@ async def genuine_agent_opportunity_rss(capability: Optional[str]=None, currency
         ("ttl","1")
     ):
         ET.SubElement(channel,tag).text=value
+    if capability is None and currency is None:
+        ET.SubElement(channel,"{"+WEBSUB_ATOM_NS+"}link",{"rel":"hub","href":WEBSUB_HUB_URL})
+        ET.SubElement(channel,"{"+WEBSUB_ATOM_NS+"}link",{"rel":"self","href":base+"/feed.xml","type":"application/rss+xml"})
     for need in needs[:MAX_PUBLIC_NEEDS]:
         item=ET.SubElement(channel,"item")
         ET.SubElement(item,"title").text=xml_safe("Unfunded buyer request: "+need["capability"])
@@ -692,9 +690,10 @@ async def genuine_agent_opportunity_rss(capability: Optional[str]=None, currency
             +". Check availability and delivery independently. No escrow or payment.")
     body=ET.tostring(root,encoding="utf-8",xml_declaration=True)
     return Response(body,media_type="application/rss+xml",
-                    headers={"Cache-Control":"public, max-age=30",
-                             "X-Content-Type-Options":"nosniff",
-                             "Content-Security-Policy":"default-src 'none'"})
+                    headers=(websub_feed_headers(base) if capability is None and currency is None else
+                             {"Cache-Control":"public, max-age=30",
+                              "X-Content-Type-Options":"nosniff",
+                              "Content-Security-Policy":"default-src 'none'"}))
 
 @app.get("/api/requests")
 async def public_requests(capability: Optional[str] = None):
@@ -1325,6 +1324,8 @@ async def service_index(request:Request):
 <meta name="robots" content="index,follow"><meta name="theme-color" content="#071522">
 <link rel="canonical" href="https://aimarket-997u.onrender.com/">
 <link rel="alternate" type="application/rss+xml" title="Genuine AI Market opportunities" href="/feed.xml">
+<link rel="service-desc" type="application/json" href="/.well-known/agent-card.json">
+<link rel="service-desc" type="application/json" href="/.well-known/mcp.json">
 <style>
 :root{color-scheme:dark;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 *{box-sizing:border-box}
@@ -1469,7 +1470,7 @@ async def mcp_public_well_known():
 
 @app.get("/.well-known/ai-market.json")
 async def machine_metadata():
-    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "connect_no_key":PUBLIC_SERVER_URL.rstrip("/")+"/connect", "real_opportunities_rss":PUBLIC_SERVER_URL.rstrip("/")+"/feed.xml", "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "a2a_jsonrpc": PUBLIC_SERVER_URL.rstrip("/") + "/a2a", "a2a_protocol_supported":True, "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "agent_flight_check":PUBLIC_SERVER_URL.rstrip("/")+"/api/agent/flight-check", "portable_agent_skill": PUBLIC_SERVER_URL.rstrip("/") + "/skills/ai-market/SKILL.md", "install_instructions":PUBLIC_SERVER_URL.rstrip("/") + "/api/install", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "buyer_studio":PUBLIC_SERVER_URL.rstrip("/") + "/post-job", "mcp_signed_buyer_tools": ["prepare_signed_request","publish_signed_request"], "headless_buyer_client":PUBLIC_SERVER_URL.rstrip("/") + "/client/post-job.py", "job_board":PUBLIC_SERVER_URL.rstrip("/") + "/jobs", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. Live proof verification exists for BTC, ETH, SOL and TRX, but end-to-end real-money settlements are not independently certified; ETH/TRX require two transfers."}
+    return {"name": "AI Market", "description": "Public custom agent registry, service discovery and trade coordination", "connect_no_key":PUBLIC_SERVER_URL.rstrip("/")+"/connect", "real_opportunities_rss":PUBLIC_SERVER_URL.rstrip("/")+"/feed.xml","websub_hub":WEBSUB_HUB_URL,"websub_topic":PUBLIC_SERVER_URL.rstrip("/")+"/feed.xml","websub_requires_subscription":True, "protocol": "ai-market-ws-v2", "transport": "WebSocket", "url": PUBLIC_SERVER_URL.rstrip("/").replace("https://", "wss://").replace("http://", "ws://") + "/ws/registry", "docs": PUBLIC_SERVER_URL.rstrip("/") + "/docs", "authentication_guide": PUBLIC_SERVER_URL.rstrip("/") + "/api/auth-guide", "mcp_endpoint": PUBLIC_SERVER_URL.rstrip("/") + "/mcp", "a2a_jsonrpc": PUBLIC_SERVER_URL.rstrip("/") + "/a2a", "a2a_protocol_supported":True, "mcp_version": "2026-07-28", "mcp_legacy_versions": list(LEGACY_MCP_VERSIONS), "agent_discovery":PUBLIC_SERVER_URL.rstrip("/")+"/.well-known/agent-card.json", "n4_directory": PUBLIC_SERVER_URL.rstrip("/") + "/api/agents?format=n4", "n4_decoder": PUBLIC_SERVER_URL.rstrip("/") + "/client/n4.js", "onboarding": PUBLIC_SERVER_URL.rstrip("/") + "/api/onboarding", "agent_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/connect-agent.py", "agent_instructions": PUBLIC_SERVER_URL.rstrip("/") + "/llms.txt", "agent_flight_check":PUBLIC_SERVER_URL.rstrip("/")+"/api/agent/flight-check", "portable_agent_skill": PUBLIC_SERVER_URL.rstrip("/") + "/skills/ai-market/SKILL.md", "install_instructions":PUBLIC_SERVER_URL.rstrip("/") + "/api/install", "usage_statistics": PUBLIC_SERVER_URL.rstrip("/") + "/api/market/stats", "one_call_market":PUBLIC_SERVER_URL.rstrip("/") + "/api/agent/now", "real_requests":PUBLIC_SERVER_URL.rstrip("/") + "/api/requests", "buyer_studio":PUBLIC_SERVER_URL.rstrip("/") + "/post-job", "mcp_signed_buyer_tools": ["prepare_signed_request","publish_signed_request"], "headless_buyer_client":PUBLIC_SERVER_URL.rstrip("/") + "/client/post-job.py", "job_board":PUBLIC_SERVER_URL.rstrip("/") + "/jobs", "fee_rate": 0.02, "supported_currencies": list(FEE_WALLETS), "escrow": False, "verified_settlement": False, "persistent_orders": False, "eth_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/quote", "eth_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/eth/verify", "eth_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/eth-pay.js", "btc_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/quote", "btc_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/btc/verify", "btc_agent": PUBLIC_SERVER_URL.rstrip("/") + "/client/btc-agent.py", "native_quote": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/quote", "native_verify": PUBLIC_SERVER_URL.rstrip("/") + "/api/payments/native/verify", "native_client": PUBLIC_SERVER_URL.rstrip("/") + "/client/native-agent.py", "warning": "Never send a private key. Live proof verification exists for BTC, ETH, SOL and TRX, but end-to-end real-money settlements are not independently certified; ETH/TRX require two transfers."}
 
 def encode_n4_directory(safe):
     # Lossless, optional compact representation for non-financial service metadata.
