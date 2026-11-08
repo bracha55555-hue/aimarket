@@ -41,7 +41,7 @@ jobs:
           print("VISIBLE_FORMS",forms.forms[:5])
           import re
           source=raw.decode("utf-8","replace")
-          for item in re.findall(r'<script[^>]*src=["\\']([^"\\']+)["\\']',source,re.I)[:12]:
+          for item in re.findall(r'<script[^>]*src="([^"]+)"',source,re.I)[:12]:
               print("PUBLIC_SCRIPT_SRC",item[:190])
           for pattern in (r"fetch\\s*\\(",r"api/submit",r"submitForm",r"addEventListener\\s*\\("):
               for m in list(re.finditer(pattern,source,re.I))[:8]:
