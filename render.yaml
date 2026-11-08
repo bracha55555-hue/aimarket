@@ -1,0 +1,17 @@
+# Review-only: reference the EXISTING Render service and EXISTING free database.
+# Do not approve a Blueprint sync without reviewing whether it modifies or duplicates resources.
+services:
+  - type: web
+    name: aimarket
+    runtime: python
+    region: virginia
+    plan: free
+    repo: https://github.com/bracha55555-hue/aimarket
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: AIMARKET_N4_DATABASE_URL
+        fromDatabase:
+          name: aimarket-n4-durable
+          property: connectionString
