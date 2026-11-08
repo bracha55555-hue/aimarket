@@ -43,9 +43,12 @@ jobs:
           source=raw.decode("utf-8","replace")
           for item in re.findall(r'<script[^>]*src="([^"]+)"',source,re.I)[:12]:
               print("PUBLIC_SCRIPT_SRC",item[:190])
-          for pattern in (r"fetch\\s*\\(",r"api/submit",r"submitForm",r"addEventListener\\s*\\("):
-              for m in list(re.finditer(pattern,source,re.I))[:8]:
-                  print("PUBLIC_SUBMIT_JS_CONTEXT",source[max(0,m.start()-200):m.end()+260].replace("\\n"," ")[:600])
-
+          for pattern in ("fetch(", "/api/", "submitForm", "addEventListener("):
+              pos=0
+              for _ in range(8):
+                  hit=source.find(pattern,pos)
+                  if hit<0:break
+                  print("PUBLIC_SUBMIT_JS_CONTEXT",source[max(0,hit-210):hit+260].replace("\\n"," ")[:600])
+                  pos=hit+len(pattern)
           print("NO_POST_NO_CREDENTIALS_NO_MARKETING_SUBMISSION")
           PY
