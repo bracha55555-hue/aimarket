@@ -31,6 +31,7 @@ jobs:
           import urllib.request
           import urllib.error
           import urllib.parse
+          from xml.etree import ElementTree as ET
 
           base="https://aimarket-997u.onrender.com"
           registry="https://registry.modelcontextprotocol.io/v0.1/servers/"
@@ -145,6 +146,37 @@ jobs:
               "request_error":buyer_error,"matches_error":match_error,
               "read_only":True,"restart_durability_tested":False,
               "warning":"External N4 configuration does not prove backups, settlement persistence, or survival of a future host replacement"}
+          
+          # WebSub discovery must be publicly verifiable before any distribution claim.
+          # A hub URL or a successful hub ping does not prove a subscriber or buyer.
+          try:
+              request=urllib.request.Request(base+"/feed.xml",headers={
+                  "User-Agent":"AI-Market-Official-Business-Audit/1.0",
+                  "Accept":"application/rss+xml"})
+              with urllib.request.urlopen(request,timeout=20) as response:
+                  raw=response.read(200001)
+                  link_header=response.headers.get("Link","")
+                  feed_status=response.status
+              if len(raw)>200000:raise ValueError("RSS too large")
+              channel=ET.fromstring(raw).find("channel")
+              atom="{http://www.w3.org/2005/Atom}link"
+              links={row.get("rel"):row.get("href") for row in channel.findall(atom)}
+              expected_hub="https://pubsubhubbub.appspot.com/"
+              expected_topic=base+"/feed.xml"
+              confirmed=(feed_status==200 and
+                  links.get("hub")==expected_hub and links.get("self")==expected_topic and
+                  ('<'+expected_hub+'>; rel="hub"' in link_header) and
+                  ('<'+expected_topic+'>; rel="self"' in link_header))
+              result["production_websub"]={
+                  "http_status":feed_status,"rss_hub_and_self_publicly_advertised":confirmed,
+                  "hub":links.get("hub") if confirmed else None,
+                  "topic":links.get("self") if confirmed else None,
+                  "subscribers_verified":False,"hub_delivery_verified":False,
+                  "independent_buyers_verified_by_websub":False}
+          except (OSError,ValueError,TimeoutError,ET.ParseError,AttributeError) as exc:
+              result["production_websub"]={"rss_hub_and_self_publicly_advertised":False,
+                  "error":type(exc).__name__,"subscribers_verified":False,
+                  "hub_delivery_verified":False}
           
           metadata,error=fetch(base+"/.well-known/mcp.json")
           result["production_mcp"]={"version":metadata.get("version"),
