@@ -28,7 +28,7 @@ jobs:
                       self.current={"action":a.get("action",""),"method":a.get("method","GET"),"fields":[]}
                       self.forms.append(self.current)
                   if self.current is not None and tag in ("input","textarea","select","button"):
-                      self.current["fields"].append({"tag":tag,"name":a.get("name",""),"type":a.get("type",""),"required":"required" in a})
+                      self.current["fields"].append({"tag":tag,"name":a.get("name",""),"type":a.get("type",""),"required":"required" in a,"value":a.get("value","")})
               def handle_endtag(self,tag):
                   if tag=="form":self.current=None
           req=Request("https://agentndx.ai/submit/",headers={"User-Agent":"AI-Market-Directory-Form-Spec-Read-Only/1.0"})
@@ -50,5 +50,7 @@ jobs:
                   if hit<0:break
                   print("PUBLIC_SUBMIT_JS_CONTEXT",source[max(0,hit-210):hit+260].replace("\\n"," ")[:600])
                   pos=hit+len(pattern)
+          idx=source.find("const t=new FormData(s)")
+          if idx>=0:print("PUBLIC_FORM_HANDLER",source[idx:idx+1250].replace("\\n"," "))
           print("NO_POST_NO_CREDENTIALS_NO_MARKETING_SUBMISSION")
           PY
