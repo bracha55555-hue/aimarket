@@ -231,6 +231,35 @@ jobs:
                       "Receipt: "+pk_id+"."))
               else:print("POSTLAUNCHKIT_NOT_PUBLICLY_APPROVED",str(state)[:55])
           else:print("POSTLAUNCHKIT_REVIEW_STATUS_UNAVAILABLE")
+          # AgentNDX receipt #320 is only a received review request (HTTP 201).
+          # Notify on independently observed public index publication, never on receipt alone.
+          try:
+              url="https://agentndx.ai/api/servers.json"
+              req=urllib.request.Request(url,headers={**H,"Accept":"application/json"})
+              with urllib.request.urlopen(req,timeout=20) as response:
+                  if response.status!=200:raise ValueError("Directory unavailable")
+                  raw=response.read(6500001)
+              if len(raw)>6500000:raise ValueError("Directory response exceeds safe size")
+              index=json.loads(raw.decode("utf-8"))
+              entries=index.get("servers") if isinstance(index,dict) else None
+              if not isinstance(entries,list):raise ValueError("Directory entries unavailable")
+              found=[row for row in entries if isinstance(row,dict) and
+                  (str(row.get("github_url","")).rstrip("/").lower()
+                      =="https://github.com/bracha55555-hue/aimarket" or
+                   str(row.get("homepage_url","")).rstrip("/").lower()
+                      =="https://aimarket-997u.onrender.com")]
+              print("AGENTNDX_PUBLIC_INDEX_ENTRIES_MATCHING_PROJECT",len(found))
+              if found:
+                  leads.append(("AI MARKET: AgentNDX independently published AI Market listing",
+                      "AgentNDX's own public server index now contains an entry naming the exact "
+                      "AI Market repository or production homepage. Review the independently "
+                      "published directory metadata at https://agentndx.ai/api/servers.json "
+                      "and browse https://agentndx.ai/servers. Submission receipt #320 alone "
+                      "did not establish publication. Listing is proof of discoverability ONLY, "
+                      "NOT verified independent users, qualified buyers, signed offers, "
+                      "fulfillment, cryptocurrency settlements or commission revenue."))
+          except (urllib.error.HTTPError,urllib.error.URLError,ValueError,TimeoutError) as exc:
+              print("AGENTNDX_PUBLIC_REVIEW_CHECK_UNAVAILABLE",type(exc).__name__)
           m=get("https://aimarket-997u.onrender.com/api/market/stats")
           if isinstance(m,dict):
               offers=int(m.get("signed_offline_offers") or 0)
