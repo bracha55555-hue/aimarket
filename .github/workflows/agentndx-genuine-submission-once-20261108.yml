@@ -1,0 +1,92 @@
+name: Submit real AI Market discovery to AgentNDX for review once
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/agentndx-genuine-submission-once-20261108.yml
+permissions:
+  contents: read
+jobs:
+  submit-once:
+    if: github.repository == 'bracha55555-hue/aimarket'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Submit one genuine MCP/A2A listing, only if absent from public AgentNDX index
+        run: |
+          python3 - <<'PY'
+          import json
+          import urllib.error
+          import urllib.request
+          ROOT="https://aimarket-997u.onrender.com"
+          REPO="https://github.com/bracha55555-hue/aimarket"
+          DIR="https://agentndx.ai"
+          API="https://agentndx-production.up.railway.app/api/submit"
+          HEADERS={"User-Agent":"AI-Market-Operator-One-Opt-In-Listing/1.0 (+https://github.com/bracha55555-hue/aimarket)",
+                   "Accept":"application/json"}
+          def get_json(url,limit=500000):
+              req=urllib.request.Request(url,headers=HEADERS)
+              with urllib.request.urlopen(req,timeout=24) as r:
+                  if r.status!=200:raise RuntimeError("Public verification unavailable: unexpected HTTP response")
+                  raw=r.read(limit+1)
+                  if len(raw)>limit:raise RuntimeError("Verification response too large")
+                  return json.loads(raw.decode("utf-8"))
+          health=get_json(ROOT+"/health")
+          card=get_json(ROOT+"/.well-known/agent-card.json")
+          mcp=get_json(ROOT+"/.well-known/mcp.json")
+          if (health.get("status")!="online" or
+              not isinstance(health.get("deployed_git_sha"),str) or
+              mcp.get("url")!=ROOT+"/mcp" or
+              not any(isinstance(x,dict) and x.get("protocolVersion")=="1.0"
+                      and x.get("url")==ROOT+"/a2a"
+                      for x in card.get("supportedInterfaces",[]))):
+              raise RuntimeError("Actual public AI Market protocol endpoints not proven; no submission")
+          print("PUBLIC_SOURCE_AND_PROTOCOLS_VERIFIED")
+          existing=get_json(DIR+"/api/servers.json",limit=6000000)
+          rows=existing.get("servers")
+          if not isinstance(rows,list):raise RuntimeError("Could not verify directory existing entries")
+          for item in rows:
+              if not isinstance(item,dict):continue
+              if (str(item.get("github_url","")).rstrip("/").lower()==REPO.lower()
+                  or str(item.get("homepage_url","")).rstrip("/").lower()==ROOT.lower()
+                  or str(item.get("endpoint","")).rstrip("/").lower()==(ROOT+"/mcp").lower()):
+                  print("AGENTNDX_ALREADY_PUBLICLY_INDEXED; no duplicate submission, no new leads claimed")
+                  raise SystemExit(0)
+          payload={
+              "name":"AI Market — Real AI Agent Service & Buyer Discovery",
+              "github_url":REPO,
+              "homepage_url":ROOT,
+              "description":"Free public MCP and A2A discovery of genuine identity-signed offline AI service offers and unfunded buyer tasks. No escrow, guaranteed jobs, or fabricated listings.",
+              "protocols":["MCP","A2A"],
+              "contact":"",
+              "report_id":None
+          }
+          print("PUBLIC_DIRECTORY_REVIEW_REQUEST_ISSUING_ONCE; no payments, credentials, private data or fake business")
+          request=urllib.request.Request(API,method="POST",
+              headers={**HEADERS,"Content-Type":"application/json"},
+              data=json.dumps(payload,separators=(",",":"),ensure_ascii=True).encode("utf-8"))
+          try:
+              with urllib.request.urlopen(request,timeout=24) as response:
+                  status=response.status
+                  answer=response.read(10000).decode("utf-8","replace")
+          except urllib.error.HTTPError as exc:
+              status=exc.code
+              answer=exc.read(1500).decode("utf-8","replace")
+          print("AGENTNDX_REVIEW_SUBMISSION_HTTP",status)
+          if status not in (200,201,202):
+              print("AGENTNDX_NOT_ACCEPTED",answer[:300])
+              raise RuntimeError("AgentNDX did not accept the one-time review request")
+          try:
+              receipt=json.loads(answer)
+          except ValueError:
+              raise RuntimeError("Directory returned a non-JSON receipt; acceptance not verified")
+          if not isinstance(receipt,dict):
+              raise RuntimeError("Unexpected receipt shape")
+          print("AGENTNDX_REVIEW_RECEIPT",json.dumps({
+              k:v for k,v in receipt.items()
+              if k in ("id","status","success","message","submission_id") and isinstance(v,(str,bool,int))
+          })[:500])
+          if receipt.get("success") is False or receipt.get("error"):
+              raise RuntimeError("Directory receipt rejected request despite HTTP success")
+          print("AGENTNDX_REQUEST_ACCEPTED_FOR_REVIEW; not yet indexed, not independent adoption or revenue")
+          PY
