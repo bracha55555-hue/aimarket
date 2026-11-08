@@ -124,6 +124,28 @@ jobs:
               result["production_business_funnel"]=stats.get("business_funnel_events",{"note":"Not available until new release is actually deployed"})
           else:
               result["production_market"]={"error":error}
+          # Compare truthful signed-record persistence across the live public read-only APIs.
+          # This verifies live configuration consistency, NOT restoration after host replacement.
+          buyer_catalog,buyer_error=fetch(base+"/api/requests")
+          offer_matches,match_error=fetch(base+"/api/matches")
+          samples={"health":(health or {}).get("signed_record_storage"),
+                   "stats":(stats or {}).get("signed_record_storage"),
+                   "requests":(buyer_catalog or {}).get("signed_record_storage"),
+                   "matches":(offer_matches or {}).get("signed_record_storage")}
+          valid=[v for v in samples.values() if isinstance(v,dict)
+                 and isinstance(v.get("mode"),str)
+                 and type(v.get("survives_app_redeploy")) is bool]
+          consistent=(len(valid)==4 and all(v==valid[0] for v in valid))
+          result["signed_record_storage_cross_api"]={
+              "sources_present":[name for name,value in samples.items() if isinstance(value,dict)],
+              "mode":valid[0]["mode"] if consistent else "unverified",
+              "consistent":consistent,
+              "external_pg_configured":consistent and valid[0]["mode"]=="external_postgres_n4"
+                   and valid[0]["survives_app_redeploy"] is True,
+              "request_error":buyer_error,"matches_error":match_error,
+              "read_only":True,"restart_durability_tested":False,
+              "warning":"External N4 configuration does not prove backups, settlement persistence, or survival of a future host replacement"}
+          
           metadata,error=fetch(base+"/.well-known/mcp.json")
           result["production_mcp"]={"version":metadata.get("version"),
                                     "url":metadata.get("url")} if metadata else {"error":error}
