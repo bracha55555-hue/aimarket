@@ -8,6 +8,7 @@ import app as market
 import websub_distribution as sub
 
 ROOT = "https://aimarket-997u.onrender.com"
+LOCAL_FEED = market.PUBLIC_SERVER_URL.rstrip("/") + "/feed.xml"
 
 
 class GenuineWebSubSyndicationTests(unittest.TestCase):
@@ -17,11 +18,11 @@ class GenuineWebSubSyndicationTests(unittest.TestCase):
             rss=client.get("/feed.xml")
             self.assertEqual(rss.status_code,200)
             self.assertIn(sub.HUB_URL,rss.headers["link"])
-            self.assertIn(ROOT+"/feed.xml",rss.headers["link"])
+            self.assertIn(LOCAL_FEED,rss.headers["link"])
             channel=ET.fromstring(rss.content).find("channel")
             links=channel.findall("{"+sub.ATOM_NS+"}link")
             self.assertEqual([(x.get("rel"),x.get("href")) for x in links],[
-                ("hub",sub.HUB_URL),("self",ROOT+"/feed.xml")])
+                ("hub",sub.HUB_URL),("self",LOCAL_FEED)])
             self.assertEqual(channel.findall("item"),[])
             filtered=client.get("/feed.xml",params={"currency":"ETH"})
             self.assertEqual(filtered.status_code,200)
