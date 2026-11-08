@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, Response, HTMLResponse, FileResponse
 from pathlib import Path
 from n4store import N4Store
 from n4pgstore import N4PostgresStore
+from websub_distribution import notifier as opportunity_websub, HUB_URL as WEBSUB_HUB_URL, ATOM_NS as WEBSUB_ATOM_NS, hub_headers as websub_feed_headers
 from starlette.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 from typing import Dict, Literal, Optional
@@ -75,6 +76,8 @@ def usage_event(kind):
     if kind in usage_events:
         usage_events[kind] += 1
         logger.info("AIMARKET_USAGE type=%s count=%d",kind,usage_events[kind])
+        if kind in ("signed_offers_published","requests_published","requests_cancelled"):
+            opportunity_websub.schedule(PUBLIC_SERVER_URL)
 
 # Durable signed listings, buyer requests and nonbinding intents require external PostgreSQL.
 # Without the optional database URL, the legacy local N4 or ephemeral behavior is retained.
@@ -187,17 +190,6 @@ async def stale_order_reaper():
         async with state_lock:
             expire_stale_trades()
 
-async def global_discovery_broadcaster():
-    """מנגנון דמוי DHCP/DNS: השרת מכריז באופן פעיל ברשת שהוא המרכז העולמי לכל עסקאות הסוכנים"""
-    await asyncio.sleep(15)
-    while True:
-        try:
-            print(f"[REGISTRY] Agent discovery API available at {PUBLIC_SERVER_URL}; no external broadcast is performed", flush=True)
-            # שידור פעימת נוכחות המדמה שרת DNS/DHCP מרכזי ברשת הסוכנים
-            await asyncio.sleep(3600) # משדר שνομα בכל שעה עגולה
-        except Exception:
-            await asyncio.sleep(600)
-
 async def autonomous_buyer_agent(agent_id: str, cap_needed: str):
     await asyncio.sleep(5)
     uri, in_trade = f"ws://127.0.0.1:{os.getenv('PORT', '7860')}/ws/registry", False
@@ -247,7 +239,6 @@ async def autonomous_seller_agent(agent_id: str, cap_offered: str):
 async def lifespan(app: FastAPI):
     restore_n4_records()
     asyncio.create_task(keep_alive_worker())
-    asyncio.create_task(global_discovery_broadcaster())
     asyncio.create_task(stale_order_reaper())
     if os.getenv("ENABLE_INTERNAL_DEMO_AGENTS", "0") == "1":
         asyncio.create_task(autonomous_buyer_agent("ResearchBot", "web_scraping"))
@@ -651,6 +642,7 @@ async def genuine_agent_opportunity_rss(capability: Optional[str]=None, currency
                    (not currency or currency==o["currency"])]
     needs.sort(key=lambda n:n["created_at"],reverse=True)
     offers.sort(key=lambda o:o["expires_at_unix"],reverse=True)
+    ET.register_namespace("atom",WEBSUB_ATOM_NS)
     root=ET.Element("rss",{"version":"2.0"})
     channel=ET.SubElement(root,"channel")
     for tag,value in (
@@ -661,6 +653,9 @@ async def genuine_agent_opportunity_rss(capability: Optional[str]=None, currency
         ("ttl","1")
     ):
         ET.SubElement(channel,tag).text=value
+    if capability is None and currency is None:
+        ET.SubElement(channel,"{"+WEBSUB_ATOM_NS+"}link",{"rel":"hub","href":WEBSUB_HUB_URL})
+        ET.SubElement(channel,"{"+WEBSUB_ATOM_NS+"}link",{"rel":"self","href":base+"/feed.xml","type":"application/rss+xml"})
     for need in needs[:MAX_PUBLIC_NEEDS]:
         item=ET.SubElement(channel,"item")
         ET.SubElement(item,"title").text=xml_safe("Unfunded buyer request: "+need["capability"])
@@ -692,9 +687,10 @@ async def genuine_agent_opportunity_rss(capability: Optional[str]=None, currency
             +". Check availability and delivery independently. No escrow or payment.")
     body=ET.tostring(root,encoding="utf-8",xml_declaration=True)
     return Response(body,media_type="application/rss+xml",
-                    headers={"Cache-Control":"public, max-age=30",
-                             "X-Content-Type-Options":"nosniff",
-                             "Content-Security-Policy":"default-src 'none'"})
+                    headers=(websub_feed_headers(base) if capability is None and currency is None else
+                             {"Cache-Control":"public, max-age=30",
+                              "X-Content-Type-Options":"nosniff",
+                              "Content-Security-Policy":"default-src 'none'"}))
 
 @app.get("/api/requests")
 async def public_requests(capability: Optional[str] = None):
