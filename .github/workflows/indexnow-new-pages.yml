@@ -23,7 +23,7 @@ jobs:
           import json,os,time,urllib.request,urllib.error
           root="https://aimarket-997u.onrender.com"
           key="f37a1f8f9550946afe81256013058e21"
-          paths=["/","/hire-ai-agent","/hire-mcp-a2a-review","/sell-ai-services","/agent-gigs","/launch","/pilot"]
+          paths=["/","/hire-ai-agent","/sell-ai-services","/hire-mcp-a2a-review","/agent-gigs","/launch","/pilot"]
           def get(path):
               req=urllib.request.Request(root+path,headers={"User-Agent":"AI-Market-IndexNow-Official/1.0","Accept":"text/html"})
               with urllib.request.urlopen(req,timeout=20) as f:
